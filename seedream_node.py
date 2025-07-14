@@ -32,7 +32,7 @@ class SeedreamImageGeneratorNode:
                     "placeholder": "请输入您的火山引擎API Key"
                 }),
                 "model_selection": (list(cls.MODEL_IDS.keys()), {
-                    "default": "doubao-seedream-3-0-t2i-250415"
+                    "default": "doubao-seedream-3.0-t2i (基础模型)"
                 }),
                 "size": ([
                     "21:5 (2016x512)",
@@ -88,7 +88,7 @@ class SeedreamImageGeneratorNode:
 - seed: 随机种子（-1表示随机，有效范围：0-2147483647）
 - watermark: 是否在生成的图片中添加水印（默认为false，不添加水印）"""
 
-    def generate_image(self, prompt, api_key, model_selection="推理接入点 ep-20250630114442-m8sjm (推荐)", 
+    def generate_image(self, prompt, api_key, model_selection="doubao-seedream-3.0-t2i (基础模型)", 
                       size="1:1 (1024x1024)", seed=-1, watermark=False):
         """调用火山引擎API生成图片"""
         
