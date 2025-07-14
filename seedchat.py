@@ -71,6 +71,14 @@ class DoubaoLLMNode:
                     "label_on": "流式输出",
                     "label_off": "非流式输出"
                 }),
+                "timeout": ("INT", {
+                    "default": 120,
+                    "min": 30,
+                    "max": 600,
+                    "step": 10,
+                    "display": "number",
+                    "tooltip": "请求超时时间（秒）"
+                }),
             },
             "optional": {
                 "image": ("IMAGE",),
@@ -116,6 +124,7 @@ class DoubaoLLMNode:
 - temperature: 控制输出随机性（0-2）
 - max_tokens: 最大输出token数
 - stream: 是否使用流式输出
+- timeout: 请求超时时间（秒，默认120秒）
 - image: 可选，输入图像
 - video_frames: 可选，视频帧序列
 - system_prompt: 可选，系统提示词
@@ -184,7 +193,7 @@ class DoubaoLLMNode:
         
         return frame_data, len(selected_indices)
 
-    def chat(self, prompt, api_key, thinking_mode, temperature, max_tokens, stream, 
+    def chat(self, prompt, api_key, thinking_mode, temperature, max_tokens, stream, timeout,
              image=None, video_frames=None, system_prompt="", conversation_history="[]", seed=-1):
         """调用火山引擎API进行对话"""
         
@@ -294,21 +303,64 @@ class DoubaoLLMNode:
                 seed = seed % 2147483648
             data["seed"] = seed
         
+        # 根据思考模式调整超时时间
+        actual_timeout = timeout
+        if thinking_mode == "thinking":
+            # 思考模式需要更长时间
+            actual_timeout = max(timeout, 180)
+        
         # 打印调试信息
         print(f"正在调用对话API...")
         print(f"模型: {model_id}")
         print(f"思考模式: {thinking_mode}")
         print(f"温度: {temperature}")
         print(f"最大输出: {max_tokens}")
+        print(f"超时时间: {actual_timeout}秒")
         
+        # 添加重试逻辑
+        max_retries = 2
+        response = None
+        
+        for attempt in range(max_retries + 1):
+            try:
+                if attempt > 0:
+                    print(f"重试第 {attempt} 次...")
+                    time.sleep(2)  # 等待2秒后重试
+                
+                # 发送请求
+                response = requests.post(
+                    api_endpoint,
+                    headers=headers,
+                    json=data,
+                    timeout=actual_timeout
+                )
+                break  # 成功则跳出重试循环
+                
+            except requests.exceptions.Timeout:
+                if attempt == max_retries:
+                    # 最后一次尝试失败
+                    error_msg = f"请求超时（{actual_timeout}秒）"
+                    if thinking_mode == "thinking":
+                        error_msg += "\n建议：\n1. 尝试使用 'non-thinking' 模式以获得更快响应\n2. 增加超时时间\n3. 简化输入内容"
+                    else:
+                        error_msg += "\n建议：\n1. 检查网络连接\n2. 增加超时时间\n3. 简化输入内容"
+                    raise RuntimeError(error_msg)
+                continue  # 继续重试
+                
+            except requests.exceptions.ConnectionError as e:
+                if attempt == max_retries:
+                    raise RuntimeError(f"网络连接失败: {str(e)}\n请检查网络连接和API端点是否正确")
+                continue  # 继续重试
+            
+            except requests.exceptions.RequestException as e:
+                if attempt == max_retries:
+                    raise RuntimeError(f"网络请求失败: {str(e)}")
+                continue  # 继续重试
+        
+        # 处理响应
         try:
-            # 发送请求
-            response = requests.post(
-                api_endpoint,
-                headers=headers,
-                json=data,
-                timeout=60
-            )
+            if response is None:
+                raise RuntimeError("请求失败：无法获取响应")
             
             if response.status_code != 200:
                 error_msg = f"API调用失败: {response.status_code}"
@@ -363,8 +415,6 @@ class DoubaoLLMNode:
                 thinking_tokens
             )
             
-        except requests.exceptions.RequestException as e:
-            raise RuntimeError(f"网络请求失败: {str(e)}")
         except Exception as e:
             raise RuntimeError(f"对话时出错: {str(e)}")
 
