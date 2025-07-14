@@ -1,0 +1,14 @@
+# pyproject.toml
+[project]
+name = "ComfyUI_Jimeng_api" # Unique identifier for your node. Immutable after creation.
+description = "Generate images, videos, and intelligent conversations in ComfyUI using the Volcano Seedreanm API."
+version = "3.1.1" # Custom Node version. Must be semantically versioned.
+license = { file = "LICENSE.txt" }
+dependencies  = {file = ["requirements.txt"]} # Filled in from requirements.txt
+
+[project.urls]
+Repository = "https://github.com/Yunwuxin-666/Comfyui-Jimeng-api"
+
+[tool.comfy]
+PublisherId = "yunwuxin" # TODO (fill in Publisher ID from Comfy Registry Website).
+DisplayName = "ComfyUI_Jimeng_api" # Display name for the Custom Node. Can be changed later.
