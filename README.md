@@ -66,7 +66,7 @@
 
 ## 📦 安装方法
 
-### 方法一：ComfyUI Manager安装（推荐）
+### 方法一：ComfyUI Manager安装（暂未上线，后续会支持上）
 1. 在ComfyUI中打开Manager
 2. 搜索"即梦AI"或"Jimeng"
 3. 点击安装并重启ComfyUI
