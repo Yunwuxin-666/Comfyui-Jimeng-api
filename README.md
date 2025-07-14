@@ -77,10 +77,10 @@
 cd /path/to/ComfyUI/custom_nodes
 
 # 克隆本仓库
-git clone https://github.com/your-username/Comfyui_jimeng_api.git
+git clone https://github.com/Yunwuxin-666/Comfyui-Jimeng-api.git
 
 # 进入插件目录
-cd Comfyui_jimeng_api
+cd Comfyui-Jimeng-api
 
 # 安装依赖
 pip install -r requirements.txt
@@ -89,7 +89,7 @@ pip install -r requirements.txt
 ### 方法三：手动安装
 1. 下载本仓库的ZIP文件
 2. 解压到ComfyUI的`custom_nodes`目录下
-3. 确保文件夹名为`Comfyui_jimeng_api`
+3. 确保文件夹名为`Comfyui-Jimeng-api`
 4. 安装依赖：
    ```bash
    pip install -r requirements.txt
