@@ -405,7 +405,7 @@ class SeedreamVideoGeneratorNode:
                 api_endpoint,
                 headers=headers,
                 json=data,
-                timeout=60
+                timeout=300
             )
             
             if response.status_code != 200:
