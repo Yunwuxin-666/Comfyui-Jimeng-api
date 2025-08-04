@@ -183,7 +183,7 @@ class SeedreamVideoGeneratorNode:
                 logger.info(f"[视频下载] 正在下载视频 (尝试 {attempt + 1}/{max_retries})")
                 logger.info(f"[下载URL] {video_url}")
                 
-                response = requests.get(video_url, stream=True, timeout=120)
+                response = requests.get(video_url, stream=True, timeout=300)
                 
                 logger.info(f"[下载响应] 状态码: {response.status_code}")
                 logger.info(f"[内容类型] {response.headers.get('Content-Type', 'Unknown')}")
@@ -631,7 +631,7 @@ class SeedreamVideoPreviewNode:
                 try:
                     # 下载视频
                     logger.info(f"[预览下载] 正在下载视频: {video_url}")
-                    response = requests.get(video_url, stream=True, timeout=60)
+                    response = requests.get(video_url, stream=True, timeout=300)
                     
                     logger.info(f"[预览下载响应] 状态码: {response.status_code}")
                     logger.info(f"[内容类型] {response.headers.get('Content-Type', 'Unknown')}")

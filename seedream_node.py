@@ -217,7 +217,7 @@ class SeedreamImageGeneratorNode:
                 f"{api_endpoint}/images/generations",
                 headers=headers,
                 json=data,
-                timeout=60  # 60秒超时
+                timeout=300  # 300秒超时
             )
             
             # 调试模式：打印响应信息
@@ -267,7 +267,7 @@ class SeedreamImageGeneratorNode:
                         # 从URL下载图片
                         img_url = img_data.get("url")
                         if img_url:
-                            img_response = requests.get(img_url, timeout=30)
+                            img_response = requests.get(img_url, timeout=300)
                             img = Image.open(BytesIO(img_response.content))
                     else:
                         # 从base64解码图片
