@@ -500,7 +500,7 @@ class SeedreamVideoGeneratorNode:
                 status_response = requests.get(
                     query_url,
                     headers=headers,
-                    timeout=60
+                    timeout=300
                 )
                 
                 logger.info(f"[状态查询响应] 状态码: {status_response.status_code}")
