@@ -180,25 +180,56 @@ class SeedreamVideoGeneratorNode:
         """下载视频文件"""
         for attempt in range(max_retries):
             try:
-                logger.info(f"正在下载视频 (尝试 {attempt + 1}/{max_retries})")
-                response = requests.get(video_url, stream=True, timeout=60)
+                logger.info(f"[视频下载] 正在下载视频 (尝试 {attempt + 1}/{max_retries})")
+                logger.info(f"[下载URL] {video_url}")
+                
+                response = requests.get(video_url, stream=True, timeout=120)
+                
+                logger.info(f"[下载响应] 状态码: {response.status_code}")
+                logger.info(f"[内容类型] {response.headers.get('Content-Type', 'Unknown')}")
+                logger.info(f"[内容长度] {response.headers.get('Content-Length', 'Unknown')} bytes")
+                
                 response.raise_for_status()
                 
                 # 创建临时文件
                 with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp_file:
+                    downloaded_size = 0
                     for chunk in response.iter_content(chunk_size=8192):
                         if chunk:
                             tmp_file.write(chunk)
+                            downloaded_size += len(chunk)
                     temp_path = tmp_file.name
                 
-                logger.info(f"视频下载成功: {temp_path}")
+                logger.info(f"[下载完成] 视频已保存到: {temp_path}")
+                logger.info(f"[文件大小] {downloaded_size} bytes")
                 return temp_path
                 
-            except Exception as e:
-                logger.error(f"下载失败 (尝试 {attempt + 1}): {str(e)}")
+            except requests.exceptions.HTTPError as e:
+                logger.error(f"[HTTP错误] 尝试 {attempt + 1}: {str(e)}")
+                logger.error(f"[响应状态] {e.response.status_code if e.response else 'No response'}")
+                logger.error(f"[响应内容] {e.response.text[:500] if e.response else 'No response'}")
                 if attempt == max_retries - 1:
                     raise
-                time.sleep(2)
+                    
+            except requests.exceptions.ConnectionError as e:
+                logger.error(f"[连接错误] 尝试 {attempt + 1}: {str(e)}")
+                logger.error(f"[URL] {video_url}")
+                if attempt == max_retries - 1:
+                    raise
+                    
+            except requests.exceptions.Timeout as e:
+                logger.error(f"[超时错误] 尝试 {attempt + 1}: {str(e)}")
+                logger.error(f"[URL] {video_url}")
+                if attempt == max_retries - 1:
+                    raise
+                    
+            except Exception as e:
+                logger.error(f"[未知错误] 尝试 {attempt + 1}: {type(e).__name__}: {str(e)}")
+                logger.error(f"[URL] {video_url}")
+                if attempt == max_retries - 1:
+                    raise
+                    
+            time.sleep(2)
         
         return None
 
@@ -401,6 +432,16 @@ class SeedreamVideoGeneratorNode:
         
         try:
             # 创建视频生成任务
+            logger.info(f"[请求详情] POST {api_endpoint}")
+            logger.info(f"[请求模型] {model_id}")
+            logger.info(f"[请求内容数量] {len(content)} 项")
+            
+            # 打印请求头（隐藏API Key的具体值）
+            safe_headers = headers.copy()
+            if "Authorization" in safe_headers:
+                safe_headers["Authorization"] = f"Bearer {api_key[:8]}..." if len(api_key) > 8 else "Bearer ***"
+            logger.info(f"[请求头] {json.dumps(safe_headers, ensure_ascii=False)}")
+            
             response = requests.post(
                 api_endpoint,
                 headers=headers,
@@ -408,16 +449,28 @@ class SeedreamVideoGeneratorNode:
                 timeout=300
             )
             
+            # 记录响应详情
+            logger.info(f"[响应状态码] {response.status_code}")
+            logger.info(f"[响应头] {dict(response.headers)}")
+            
             if response.status_code != 200:
                 error_msg = f"创建任务失败: {response.status_code}"
+                logger.error(f"[错误响应] 状态码: {response.status_code}")
+                logger.error(f"[错误URL] {api_endpoint}")
+                
                 try:
                     error_data = response.json()
+                    logger.error(f"[错误响应体] {json.dumps(error_data, ensure_ascii=False, indent=2)}")
+                    
                     if "error" in error_data:
                         error_msg += f" - {json.dumps(error_data['error'], ensure_ascii=False)}"
                     else:
                         error_msg += f" - {response.text}"
-                except:
+                except Exception as parse_error:
+                    logger.error(f"[解析错误响应失败] {str(parse_error)}")
+                    logger.error(f"[原始响应内容] {response.text[:1000]}")  # 限制长度避免日志过大
                     error_msg += f" - {response.text}"
+                    
                 raise RuntimeError(error_msg)
             
             # 解析响应
@@ -442,13 +495,27 @@ class SeedreamVideoGeneratorNode:
                 attempts += 1
                 
                 # 查询任务状态
+                logger.info(f"[状态查询] GET {query_url}")
+                
                 status_response = requests.get(
                     query_url,
                     headers=headers,
                     timeout=60
                 )
                 
+                logger.info(f"[状态查询响应] 状态码: {status_response.status_code}")
+                
                 if status_response.status_code != 200:
+                    logger.error(f"[状态查询失败] 状态码: {status_response.status_code}")
+                    logger.error(f"[查询URL] {query_url}")
+                    logger.error(f"[响应头] {dict(status_response.headers)}")
+                    
+                    try:
+                        error_data = status_response.json()
+                        logger.error(f"[错误响应体] {json.dumps(error_data, ensure_ascii=False, indent=2)}")
+                    except:
+                        logger.error(f"[原始响应] {status_response.text[:500]}")
+                    
                     print(f"查询任务状态失败: {status_response.status_code}")
                     continue
                 
@@ -494,8 +561,12 @@ class SeedreamVideoGeneratorNode:
             return (frames, frame_count, fps, video_url, task_id)
             
         except requests.exceptions.RequestException as e:
+            logger.error(f"[网络请求异常] {type(e).__name__}: {str(e)}")
+            logger.error(f"[请求详情] 最后请求的URL: {api_endpoint if 'api_endpoint' in locals() else 'Unknown'}")
             raise RuntimeError(f"网络请求失败: {str(e)}")
         except Exception as e:
+            logger.error(f"[生成视频异常] {type(e).__name__}: {str(e)}")
+            logger.error(f"[异常堆栈]", exc_info=True)
             raise RuntimeError(f"生成视频时出错: {str(e)}")
 
     @classmethod
@@ -559,8 +630,13 @@ class SeedreamVideoPreviewNode:
             if save_video:
                 try:
                     # 下载视频
-                    print(f"正在下载视频: {video_url}")
+                    logger.info(f"[预览下载] 正在下载视频: {video_url}")
                     response = requests.get(video_url, stream=True, timeout=60)
+                    
+                    logger.info(f"[预览下载响应] 状态码: {response.status_code}")
+                    logger.info(f"[内容类型] {response.headers.get('Content-Type', 'Unknown')}")
+                    logger.info(f"[内容长度] {response.headers.get('Content-Length', 'Unknown')} bytes")
+                    
                     response.raise_for_status()
                     
                     # 创建输出目录
@@ -573,13 +649,39 @@ class SeedreamVideoPreviewNode:
                     local_path = os.path.join(output_dir, filename)
                     
                     # 保存视频
+                    downloaded_size = 0
                     with open(local_path, 'wb') as f:
                         for chunk in response.iter_content(chunk_size=8192):
-                            f.write(chunk)
+                            if chunk:
+                                f.write(chunk)
+                                downloaded_size += len(chunk)
                     
+                    logger.info(f"[预览下载完成] 视频已保存到: {local_path}")
+                    logger.info(f"[文件大小] {downloaded_size} bytes")
                     print(f"视频已保存到: {local_path}")
                     
+                except requests.exceptions.HTTPError as e:
+                    logger.error(f"[预览HTTP错误] {str(e)}")
+                    logger.error(f"[响应状态] {e.response.status_code if e.response else 'No response'}")
+                    logger.error(f"[响应内容] {e.response.text[:500] if e.response else 'No response'}")
+                    print(f"下载视频失败: {str(e)}")
+                    local_path = video_url
+                    
+                except requests.exceptions.ConnectionError as e:
+                    logger.error(f"[预览连接错误] {str(e)}")
+                    logger.error(f"[URL] {video_url}")
+                    print(f"下载视频失败: 连接错误 - {str(e)}")
+                    local_path = video_url
+                    
+                except requests.exceptions.Timeout as e:
+                    logger.error(f"[预览超时错误] {str(e)}")
+                    logger.error(f"[URL] {video_url}")
+                    print(f"下载视频失败: 请求超时 - {str(e)}")
+                    local_path = video_url
+                    
                 except Exception as e:
+                    logger.error(f"[预览未知错误] {type(e).__name__}: {str(e)}")
+                    logger.error(f"[URL] {video_url}")
                     print(f"下载视频失败: {str(e)}")
                     local_path = video_url  # 如果下载失败，返回原始URL
             else:
