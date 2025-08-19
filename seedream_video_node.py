@@ -3,6 +3,11 @@ import torch
 import numpy as np
 from PIL import Image
 import requests
+from requests.adapters import HTTPAdapter
+try:
+    from requests.packages.urllib3.util.retry import Retry
+except ImportError:
+    from urllib3.util.retry import Retry
 from io import BytesIO
 import json
 import time
@@ -10,6 +15,8 @@ import tempfile
 import cv2
 import logging
 import base64
+import ssl
+import urllib3
 
 # 设置日志
 logging.basicConfig(level=logging.INFO)
@@ -20,6 +27,41 @@ class SeedreamVideoGeneratorNode:
     调用火山引擎即梦API生成视频的节点
     支持文本到视频、图片到视频和首尾帧控制的视频生成
     """
+    
+    def __init__(self):
+        # 禁用不安全请求警告
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    
+    def create_robust_session(self, max_retries=3, backoff_factor=1.0):
+        """创建具有重试机制和SSL优化的requests会话"""
+        session = requests.Session()
+        
+        # 配置重试策略
+        retry_strategy = Retry(
+            total=max_retries,
+            status_forcelist=[429, 500, 502, 503, 504],
+            method_whitelist=["HEAD", "GET", "PUT", "DELETE", "OPTIONS", "TRACE", "POST"],
+            backoff_factor=backoff_factor,
+            raise_on_redirect=False,
+            raise_on_status=False
+        )
+        
+        # 配置HTTP适配器
+        adapter = HTTPAdapter(
+            max_retries=retry_strategy,
+            pool_connections=10,
+            pool_maxsize=20,
+            pool_block=False
+        )
+        
+        # 挂载适配器
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+        
+        # 设置默认超时
+        session.timeout = (10, 300)  # (连接超时, 读取超时)
+        
+        return session
     
     @classmethod
     def INPUT_TYPES(cls):
@@ -178,12 +220,15 @@ class SeedreamVideoGeneratorNode:
 
     def download_video(self, video_url, max_retries=3):
         """下载视频文件"""
+        session = self.create_robust_session(max_retries=max_retries)
+        
         for attempt in range(max_retries):
             try:
                 logger.info(f"[视频下载] 正在下载视频 (尝试 {attempt + 1}/{max_retries})")
                 logger.info(f"[下载URL] {video_url}")
                 
-                response = requests.get(video_url, stream=True, timeout=300)
+                # 使用健壮的会话下载
+                response = session.get(video_url, stream=True, timeout=(10, 300))
                 
                 logger.info(f"[下载响应] 状态码: {response.status_code}")
                 logger.info(f"[内容类型] {response.headers.get('Content-Type', 'Unknown')}")
@@ -204,6 +249,16 @@ class SeedreamVideoGeneratorNode:
                 logger.info(f"[文件大小] {downloaded_size} bytes")
                 return temp_path
                 
+            except (requests.exceptions.SSLError, ssl.SSLError) as e:
+                logger.error(f"[SSL错误] 尝试 {attempt + 1}: {str(e)}")
+                logger.error(f"[URL] {video_url}")
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt  # 指数退避
+                    logger.info(f"[SSL重试] 等待 {wait_time} 秒后重试...")
+                    time.sleep(wait_time)
+                else:
+                    raise
+                    
             except requests.exceptions.HTTPError as e:
                 logger.error(f"[HTTP错误] 尝试 {attempt + 1}: {str(e)}")
                 logger.error(f"[响应状态] {e.response.status_code if e.response else 'No response'}")
@@ -214,13 +269,21 @@ class SeedreamVideoGeneratorNode:
             except requests.exceptions.ConnectionError as e:
                 logger.error(f"[连接错误] 尝试 {attempt + 1}: {str(e)}")
                 logger.error(f"[URL] {video_url}")
-                if attempt == max_retries - 1:
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt  # 指数退避
+                    logger.info(f"[连接重试] 等待 {wait_time} 秒后重试...")
+                    time.sleep(wait_time)
+                else:
                     raise
                     
             except requests.exceptions.Timeout as e:
                 logger.error(f"[超时错误] 尝试 {attempt + 1}: {str(e)}")
                 logger.error(f"[URL] {video_url}")
-                if attempt == max_retries - 1:
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt  # 指数退避
+                    logger.info(f"[超时重试] 等待 {wait_time} 秒后重试...")
+                    time.sleep(wait_time)
+                else:
                     raise
                     
             except Exception as e:
@@ -228,8 +291,10 @@ class SeedreamVideoGeneratorNode:
                 logger.error(f"[URL] {video_url}")
                 if attempt == max_retries - 1:
                     raise
-                    
-            time.sleep(2)
+                else:
+                    wait_time = 2 ** attempt  # 指数退避
+                    logger.info(f"[通用重试] 等待 {wait_time} 秒后重试...")
+                    time.sleep(wait_time)
         
         return None
 
@@ -431,6 +496,9 @@ class SeedreamVideoGeneratorNode:
         print(f"内容数量: {len(content)} 项")
         
         try:
+            # 创建健壮的会话
+            session = self.create_robust_session(max_retries=3, backoff_factor=1.0)
+            
             # 创建视频生成任务
             logger.info(f"[请求详情] POST {api_endpoint}")
             logger.info(f"[请求模型] {model_id}")
@@ -442,11 +510,12 @@ class SeedreamVideoGeneratorNode:
                 safe_headers["Authorization"] = f"Bearer {api_key[:8]}..." if len(api_key) > 8 else "Bearer ***"
             logger.info(f"[请求头] {json.dumps(safe_headers, ensure_ascii=False)}")
             
-            response = requests.post(
+            # 使用健壮的会话发送请求
+            response = session.post(
                 api_endpoint,
                 headers=headers,
                 json=data,
-                timeout=300
+                timeout=(10, 300)  # (连接超时, 读取超时)
             )
             
             # 记录响应详情
@@ -497,10 +566,10 @@ class SeedreamVideoGeneratorNode:
                 # 查询任务状态
                 logger.info(f"[状态查询] GET {query_url}")
                 
-                status_response = requests.get(
+                status_response = session.get(
                     query_url,
                     headers=headers,
-                    timeout=300
+                    timeout=(10, 300)  # (连接超时, 读取超时)
                 )
                 
                 logger.info(f"[状态查询响应] 状态码: {status_response.status_code}")
@@ -560,6 +629,26 @@ class SeedreamVideoGeneratorNode:
             # 返回结果
             return (frames, frame_count, fps, video_url, task_id)
             
+        except (requests.exceptions.SSLError, ssl.SSLError) as e:
+            logger.error(f"[SSL连接错误] {type(e).__name__}: {str(e)}")
+            logger.error(f"[SSL错误详情] 这通常是由网络不稳定或SSL握手失败造成的")
+            logger.error(f"[建议] 请检查网络连接，稍后重试")
+            raise RuntimeError(f"SSL连接失败，请检查网络连接后重试: {str(e)}")
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"[网络连接错误] {type(e).__name__}: {str(e)}")
+            logger.error(f"[连接错误详情] 无法建立到服务器的连接")
+            logger.error(f"[建议] 请检查网络连接和防火墙设置")
+            raise RuntimeError(f"网络连接失败，请检查网络设置: {str(e)}")
+        except requests.exceptions.Timeout as e:
+            logger.error(f"[请求超时错误] {type(e).__name__}: {str(e)}")
+            logger.error(f"[超时详情] 请求时间过长导致超时")
+            logger.error(f"[建议] 请检查网络速度，稍后重试")
+            raise RuntimeError(f"请求超时，请检查网络速度后重试: {str(e)}")
+        except requests.exceptions.HTTPError as e:
+            logger.error(f"[HTTP错误] {type(e).__name__}: {str(e)}")
+            logger.error(f"[HTTP状态码] {e.response.status_code if e.response else 'Unknown'}")
+            logger.error(f"[响应内容] {e.response.text[:500] if e.response else 'No response'}")
+            raise RuntimeError(f"HTTP请求失败: {str(e)}")
         except requests.exceptions.RequestException as e:
             logger.error(f"[网络请求异常] {type(e).__name__}: {str(e)}")
             logger.error(f"[请求详情] 最后请求的URL: {api_endpoint if 'api_endpoint' in locals() else 'Unknown'}")
@@ -629,9 +718,12 @@ class SeedreamVideoPreviewNode:
         elif video_url:
             if save_video:
                 try:
+                    # 创建健壮的会话
+                    session = self.create_robust_session(max_retries=3)
+                    
                     # 下载视频
                     logger.info(f"[预览下载] 正在下载视频: {video_url}")
-                    response = requests.get(video_url, stream=True, timeout=300)
+                    response = session.get(video_url, stream=True, timeout=(10, 300))
                     
                     logger.info(f"[预览下载响应] 状态码: {response.status_code}")
                     logger.info(f"[内容类型] {response.headers.get('Content-Type', 'Unknown')}")
