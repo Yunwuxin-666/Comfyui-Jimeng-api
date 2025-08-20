@@ -4,10 +4,7 @@ import numpy as np
 from PIL import Image
 import requests
 from requests.adapters import HTTPAdapter
-try:
-    from requests.packages.urllib3.util.retry import Retry
-except ImportError:
-    from urllib3.util.retry import Retry
+from urllib3.util.retry import Retry
 from io import BytesIO
 import json
 import time
@@ -17,6 +14,38 @@ import logging
 import base64
 import ssl
 import urllib3
+
+# 导入网络配置
+try:
+    from network_config import *
+except ImportError:
+    # 如果配置文件不存在，使用默认配置
+    CONNECTION_TIMEOUT = 15
+    READ_TIMEOUT = 600
+    MAX_RETRIES = 5
+    BACKOFF_FACTOR = 2.0
+    MAX_WAIT_TIME = 30
+    POOL_CONNECTIONS = 20
+    POOL_MAXSIZE = 50
+    POOL_BLOCK = False
+    # POOL_CONNECTIONS_RETRY = 3  # 已移除，兼容性问题
+    STATUS_QUERY_INTERVAL = 5
+    MAX_STATUS_QUERIES = 60
+    STATUS_RETRY_ATTEMPTS = 3
+    NETWORK_DIAGNOSIS_TIMEOUT = 5
+    NETWORK_CHECK_INTERVAL = 300
+    API_ENDPOINTS = {
+        "primary": "http://ark.cn-beijing.volces.com",
+        "fallback": "https://ark.cn-beijing.volces.com",
+        "alternative": "http://ark.cn-shanghai.volces.com"
+    }
+    PREFER_HTTP = True
+    ENABLE_NETWORK_DIAGNOSIS = True
+    ENABLE_AUTO_PROTOCOL_SWITCH = True
+    ENABLE_CONNECTION_WARMUP = True
+    LOG_LEVEL = "INFO"
+    SAVE_DIAGNOSIS_TO_FILE = False
+    DIAGNOSIS_FILE_PATH = "network_diagnosis.log"
 
 # 设置日志
 logging.basicConfig(level=logging.INFO)
@@ -31,35 +60,144 @@ class SeedreamVideoGeneratorNode:
     def __init__(self):
         # 禁用不安全请求警告
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        
+        # 网络诊断状态
+        self.network_status = {
+            'http_available': True,
+            'https_available': True,
+            'last_check': None,
+            'connection_quality': 'unknown'
+        }
     
-    def create_robust_session(self, max_retries=3, backoff_factor=1.0):
-        """创建具有重试机制和SSL优化的requests会话"""
+    def diagnose_network(self, endpoint_base="ark.cn-beijing.volces.com"):
+        """诊断网络连接状态"""
+        print("🔍 网络诊断中...")
+        
+        test_endpoints = [
+            f"http://{endpoint_base}",
+            f"https://{endpoint_base}"
+        ]
+        
+        for endpoint in test_endpoints:
+            try:
+                session = requests.Session()
+                session.timeout = (5, 10)  # 快速测试
+                
+                response = session.get(f"{endpoint}/api/v3/contents/generations/tasks", timeout=(5, 10))
+                
+                if endpoint.startswith("http://"):
+                    self.network_status['http_available'] = True
+                else:
+                    self.network_status['https_available'] = True
+                    
+            except Exception as e:
+                if endpoint.startswith("http://"):
+                    self.network_status['http_available'] = False
+                else:
+                    self.network_status['https_available'] = False
+        
+        # 更新连接质量评估
+        if self.network_status['http_available'] and self.network_status['https_available']:
+            self.network_status['connection_quality'] = 'excellent'
+        elif self.network_status['http_available'] or self.network_status['https_available']:
+            self.network_status['connection_quality'] = 'good'
+        else:
+            self.network_status['connection_quality'] = 'poor'
+        
+        self.network_status['last_check'] = time.time()
+        
+        return self.network_status
+    
+    def create_robust_session(self, max_retries=5, backoff_factor=2.0, use_https_fallback=True):
+        """创建具有智能重试机制和连接优化的requests会话"""
         session = requests.Session()
         
-        # 配置重试策略
-        retry_strategy = Retry(
-            total=max_retries,
-            status_forcelist=[429, 500, 502, 503, 504],
-            method_whitelist=["HEAD", "GET", "PUT", "DELETE", "OPTIONS", "TRACE", "POST"],
-            backoff_factor=backoff_factor,
-            raise_on_redirect=False,
-            raise_on_status=False
-        )
+        # 配置智能重试策略 - 兼容不同版本的urllib3
+        try:
+            # 新版本urllib3使用allowed_methods
+            retry_strategy = Retry(
+                total=max_retries,
+                status_forcelist=[408, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524],
+                allowed_methods=["HEAD", "GET", "PUT", "DELETE", "OPTIONS", "TRACE", "POST"],
+                backoff_factor=backoff_factor,
+                raise_on_redirect=False,
+                raise_on_status=False,
+                respect_retry_after_header=True
+            )
+        except TypeError:
+            # 旧版本urllib3使用method_whitelist
+            try:
+                retry_strategy = Retry(
+                    total=max_retries,
+                    status_forcelist=[408, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524],
+                    method_whitelist=["HEAD", "GET", "PUT", "DELETE", "OPTIONS", "TRACE", "POST"],
+                    backoff_factor=backoff_factor,
+                    raise_on_redirect=False,
+                    raise_on_status=False,
+                    respect_retry_after_header=True
+                )
+            except Exception as e:
+                # 使用最基本的重试配置
+                retry_strategy = Retry(
+                    total=max_retries,
+                    status_forcelist=[500, 502, 503, 504],
+                    backoff_factor=backoff_factor,
+                    raise_on_redirect=False,
+                    raise_on_status=False
+                )
         
-        # 配置HTTP适配器
-        adapter = HTTPAdapter(
-            max_retries=retry_strategy,
-            pool_connections=10,
-            pool_maxsize=20,
-            pool_block=False
-        )
+        # 配置HTTP适配器 - 优化连接池（兼容性处理）
+        try:
+            import urllib3
+            
+            # 根据版本选择参数
+            adapter_kwargs = {
+                'max_retries': retry_strategy,
+                'pool_connections': 20,  # 增加连接池大小
+                'pool_maxsize': 50,      # 增加最大连接数
+                'pool_block': False
+            }
+            
+            # 尝试使用新版本参数
+            try:
+                adapter = HTTPAdapter(**adapter_kwargs, pool_connections_retry=3)
+            except TypeError:
+                # 降级到标准配置
+                adapter = HTTPAdapter(**adapter_kwargs)
+                
+        except Exception as e:
+            # 使用最基本的配置
+            adapter = HTTPAdapter(
+                max_retries=retry_strategy,
+                pool_connections=10,
+                pool_maxsize=20,
+                pool_block=False
+            )
         
         # 挂载适配器
         session.mount("http://", adapter)
         session.mount("https://", adapter)
         
-        # 设置默认超时
-        session.timeout = (10, 300)  # (连接超时, 读取超时)
+        # 设置更合理的超时 - 连接超时短，读取超时长
+        session.timeout = (15, 600)  # (连接超时15秒, 读取超时10分钟)
+        
+        # 设置请求头优化
+        session.headers.update({
+            'Connection': 'keep-alive',
+            'Accept-Encoding': 'gzip, deflate',
+            'User-Agent': 'ComfyUI-Seedream-Node/1.0'
+        })
+        
+        # 连接池健康检查
+        try:
+            # 测试连接池是否正常工作
+            test_response = session.get("http://httpbin.org/get", timeout=(5, 10))
+            if test_response.status_code == 200:
+                print("✅ 连接池配置正常")
+            else:
+                print(f"⚠️ 连接池健康检查异常: {test_response.status_code}")
+        except Exception as e:
+            print(f"⚠️ 连接池健康检查失败，继续使用当前配置")
         
         return session
     
@@ -370,17 +508,16 @@ class SeedreamVideoGeneratorNode:
             raise ValueError("请在apikey.txt或前端页面输入有效的API Key")
         api_key = use_api_key
         
-        # 调试：打印所有参数
-        print(f"[DEBUG] 接收到的参数:")
-        print(f"  - prompt: {prompt[:50]}..." if prompt else "  - prompt: None")
-        print(f"  - model_selection: {model_selection}")
-        print(f"  - duration: {duration}")
-        print(f"  - ratio: {ratio}")
-        print(f"  - watermark: {watermark}")
-        print(f"  - seed: {seed}")
-        print(f"  - fps: {fps}")
-        print(f"  - image: {'有' if image is not None else '无'}")
-        print(f"  - end_image: {'有' if end_image is not None else '无'}")
+        # 调试：打印关键参数
+        print(f"📋 参数检查:")
+        print(f"  - 模型: {model_selection}")
+        print(f"  - 时长: {duration}秒")
+        print(f"  - 比例: {ratio}")
+        print(f"  - 水印: {'开启' if watermark else '关闭'}")
+        print(f"  - 种子: {seed}")
+        print(f"  - 帧率: {fps}fps")
+        print(f"  - 首帧: {'有' if image is not None else '无'}")
+        print(f"  - 尾帧: {'有' if end_image is not None else '无'}")
         
         if not api_key:
             raise ValueError("请提供有效的API Key")
@@ -401,6 +538,24 @@ class SeedreamVideoGeneratorNode:
         
         print(f"生成模式: {generation_mode}")
         
+        # 网络诊断 - 检查连接状态
+        try:
+            network_status = self.diagnose_network()
+            quality = network_status['connection_quality']
+            print(f"🌐 网络状态: {quality}")
+            
+            # 根据网络状态选择最优协议
+            if not network_status['http_available'] and network_status['https_available']:
+                api_endpoint = api_endpoint.replace("http://", "https://")
+                print(f"🔒 使用HTTPS协议")
+            elif network_status['http_available'] and not network_status['https_available']:
+                print(f"🌐 使用HTTP协议")
+            else:
+                print(f"🌐 使用HTTP协议 (优先)")
+                
+        except Exception as e:
+            logger.warning(f"网络诊断失败: {str(e)}，使用默认配置")
+        
         # 验证模型是否支持当前模式
         if model_selection == "doubao-seedance-1-0-lite-t2v-250428":
             # t2v模型仅支持文生视频
@@ -412,8 +567,8 @@ class SeedreamVideoGeneratorNode:
                 raise ValueError(f"模型 {model_selection} 不支持纯文生视频，请提供至少一张输入图片")
         # pro模型支持所有模式，无需验证
         
-        # API配置
-        api_endpoint = "https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks"
+        # API配置 - 支持HTTP降级
+        api_endpoint = "http://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks"
         model_id = model_selection  # 使用用户选择的模型
         
         # 构建提示词（添加参数）
@@ -454,7 +609,7 @@ class SeedreamVideoGeneratorNode:
         
         # 如果有首帧图片，添加图片内容
         if has_start_image:
-            print("正在处理首帧图片...")
+            print("🖼️ 处理首帧图片...")
             # 获取图片URL（base64或上传后的URL）
             start_image_url = self.upload_image_to_temp_service(image)
             content.append({
@@ -464,11 +619,11 @@ class SeedreamVideoGeneratorNode:
                     "url": start_image_url
                 }
             })
-            print("首帧图片处理完成")
+            print("✅ 首帧图片处理完成")
         
         # 如果有尾帧图片，添加图片内容
         if has_end_image:
-            print("正在处理尾帧图片...")
+            print("🖼️ 处理尾帧图片...")
             # 获取图片URL（base64或上传后的URL）
             end_image_url = self.upload_image_to_temp_service(end_image)
             content.append({
@@ -478,7 +633,7 @@ class SeedreamVideoGeneratorNode:
                     "url": end_image_url
                 }
             })
-            print("尾帧图片处理完成")
+            print("✅ 尾帧图片处理完成")
         
         # 准备请求数据
         data = {
@@ -486,60 +641,73 @@ class SeedreamVideoGeneratorNode:
             "content": content
         }
         
-        # 打印调试信息
-        print(f"正在创建{generation_mode}任务...")
-        print(f"模型: {model_id}")
-        print(f"水印: {'开启' if watermark else '关闭'}")
+        # 打印任务信息
+        print(f"🎬 创建{generation_mode}任务")
+        print(f"🤖 模型: {model_id}")
+        print(f"💧 水印: {'开启' if watermark else '关闭'}")
         if fps:
-            print(f"帧率: {fps}fps")
-        print(f"提示词: {full_prompt}")
-        print(f"内容数量: {len(content)} 项")
+            print(f"🎯 帧率: {fps}fps")
+        print(f"📝 提示词: {full_prompt[:100]}{'...' if len(full_prompt) > 100 else ''}")
+        print(f"📊 内容数量: {len(content)} 项")
         
         try:
-            # 创建健壮的会话
-            session = self.create_robust_session(max_retries=3, backoff_factor=1.0)
+            # 智能重试策略 - 支持HTTP降级
+            max_attempts = 3
+            current_attempt = 0
+            response = None
             
-            # 创建视频生成任务
-            logger.info(f"[请求详情] POST {api_endpoint}")
-            logger.info(f"[请求模型] {model_id}")
-            logger.info(f"[请求内容数量] {len(content)} 项")
-            
-            # 打印请求头（隐藏API Key的具体值）
-            safe_headers = headers.copy()
-            if "Authorization" in safe_headers:
-                safe_headers["Authorization"] = f"Bearer {api_key[:8]}..." if len(api_key) > 8 else "Bearer ***"
-            logger.info(f"[请求头] {json.dumps(safe_headers, ensure_ascii=False)}")
-            
-            # 使用健壮的会话发送请求
-            response = session.post(
-                api_endpoint,
-                headers=headers,
-                json=data,
-                timeout=(10, 300)  # (连接超时, 读取超时)
-            )
-            
-            # 记录响应详情
-            logger.info(f"[响应状态码] {response.status_code}")
-            logger.info(f"[响应头] {dict(response.headers)}")
-            
-            if response.status_code != 200:
-                error_msg = f"创建任务失败: {response.status_code}"
-                logger.error(f"[错误响应] 状态码: {response.status_code}")
-                logger.error(f"[错误URL] {api_endpoint}")
+            while current_attempt < max_attempts:
+                current_attempt += 1
+                current_endpoint = api_endpoint
                 
                 try:
-                    error_data = response.json()
-                    logger.error(f"[错误响应体] {json.dumps(error_data, ensure_ascii=False, indent=2)}")
+                    # 创建健壮的会话
+                    session = self.create_robust_session(max_retries=5, backoff_factor=2.0)
                     
+                    # 记录当前尝试
+                    if current_attempt > 1:
+                        print(f"🔄 重试第 {current_attempt} 次")
+                    
+                    # 使用健壮的会话发送请求
+                    response = session.post(
+                        current_endpoint,
+                        headers=headers,
+                        json=data,
+                        timeout=(15, 600)  # (连接超时, 读取超时)
+                    )
+                    
+                    # 如果成功，跳出重试循环
+                    break
+                    
+                except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+                    if current_attempt < max_attempts:
+                        # 计算等待时间 - 指数退避
+                        wait_time = min(2 ** current_attempt, 30)  # 最大等待30秒
+                        print(f"⏳ 等待 {wait_time} 秒后重试...")
+                        time.sleep(wait_time)
+                        
+                        # 如果是HTTP连接失败，尝试切换到HTTPS
+                        if current_endpoint.startswith("http://") and "ark.cn-beijing.volces.com" in current_endpoint:
+                            https_endpoint = current_endpoint.replace("http://", "https://")
+                            print(f"🔄 切换到HTTPS协议")
+                            current_endpoint = https_endpoint
+                            api_endpoint = https_endpoint  # 更新全局端点
+                        continue
+                    else:
+                        # 所有重试都失败了
+                        raise
+            
+            # 检查响应状态
+            if response.status_code != 200:
+                error_msg = f"创建任务失败: {response.status_code}"
+                try:
+                    error_data = response.json()
                     if "error" in error_data:
                         error_msg += f" - {json.dumps(error_data['error'], ensure_ascii=False)}"
                     else:
                         error_msg += f" - {response.text}"
-                except Exception as parse_error:
-                    logger.error(f"[解析错误响应失败] {str(parse_error)}")
-                    logger.error(f"[原始响应内容] {response.text[:1000]}")  # 限制长度避免日志过大
+                except Exception:
                     error_msg += f" - {response.text}"
-                    
                 raise RuntimeError(error_msg)
             
             # 解析响应
@@ -549,50 +717,67 @@ class SeedreamVideoGeneratorNode:
             if not task_id:
                 raise ValueError("未能获取任务ID")
             
-            print(f"{generation_mode}任务已创建，任务ID: {task_id}")
-            print(f"任务状态: {result.get('status', 'unknown')}")
+            print(f"✅ 任务创建成功")
+            print(f"🆔 任务ID: {task_id}")
+            print(f"📊 状态: {result.get('status', 'unknown')}")
             
-            # 轮询查询任务状态
-            query_url = f"https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks/{task_id}"
+            # 轮询查询任务状态 - 支持HTTP降级
+            query_url = f"http://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks/{task_id}"
             max_attempts = 60  # 最多等待5分钟（5秒一次）
             attempts = 0
             video_url = None
             final_status = "processing"
             
+            print(f"⏳ 开始轮询任务状态...")
+            
             while attempts < max_attempts:
                 time.sleep(5)  # 每5秒查询一次
                 attempts += 1
                 
-                # 查询任务状态
-                logger.info(f"[状态查询] GET {query_url}")
+                # 智能重试状态查询
+                status_response = None
+                status_attempts = 0
+                max_status_attempts = 3
                 
-                status_response = session.get(
-                    query_url,
-                    headers=headers,
-                    timeout=(10, 300)  # (连接超时, 读取超时)
-                )
-                
-                logger.info(f"[状态查询响应] 状态码: {status_response.status_code}")
-                
-                if status_response.status_code != 200:
-                    logger.error(f"[状态查询失败] 状态码: {status_response.status_code}")
-                    logger.error(f"[查询URL] {query_url}")
-                    logger.error(f"[响应头] {dict(status_response.headers)}")
+                while status_attempts < max_status_attempts and status_response is None:
+                    status_attempts += 1
+                    current_query_url = query_url
                     
                     try:
-                        error_data = status_response.json()
-                        logger.error(f"[错误响应体] {json.dumps(error_data, ensure_ascii=False, indent=2)}")
-                    except:
-                        logger.error(f"[原始响应] {status_response.text[:500]}")
-                    
-                    print(f"查询任务状态失败: {status_response.status_code}")
+                        # 查询任务状态
+                        status_response = session.get(
+                            current_query_url,
+                            headers=headers,
+                            timeout=(15, 300)  # (连接超时, 读取超时)
+                        )
+                        
+                        # 如果成功，跳出重试循环
+                        break
+                        
+                    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+                        if status_attempts < max_status_attempts:
+                            # 计算等待时间 - 指数退避
+                            wait_time = min(2 ** status_attempts, 10)  # 最大等待10秒
+                            time.sleep(wait_time)
+                            
+                            # 如果是HTTP连接失败，尝试切换到HTTPS
+                            if current_query_url.startswith("http://") and "ark.cn-beijing.volces.com" in current_query_url:
+                                https_query_url = current_query_url.replace("http://", "https://")
+                                current_query_url = https_query_url
+                                query_url = https_query_url  # 更新全局查询URL
+                            continue
+                        else:
+                            break
+                
+                if status_response.status_code != 200:
+                    print(f"❌ 查询状态失败: {status_response.status_code}")
                     continue
                 
                 status_data = status_response.json()
                 status = status_data.get("status")
                 final_status = status
                 
-                print(f"任务状态: {status} (尝试 {attempts}/{max_attempts})")
+                print(f"📊 状态: {status} ({attempts}/{max_attempts})")
                 
                 if status == "succeeded":
                     # 获取视频URL
@@ -600,13 +785,13 @@ class SeedreamVideoGeneratorNode:
                     video_url = content.get("video_url")
                     
                     if video_url:
-                        print(f"{generation_mode}成功！")
-                        print(f"视频URL: {video_url}")
+                        print(f"🎉 {generation_mode}成功！")
+                        print(f"🔗 视频URL: {video_url}")
                         
                         # 获取使用信息
                         usage = status_data.get("usage", {})
                         if usage:
-                            print(f"Token使用: {usage.get('total_tokens', 'N/A')}")
+                            print(f"💳 Token使用: {usage.get('total_tokens', 'N/A')}")
                         break
                     else:
                         raise ValueError("生成成功但未找到视频URL")
@@ -622,8 +807,9 @@ class SeedreamVideoGeneratorNode:
                 raise RuntimeError(f"{generation_mode}超时，最终状态: {final_status}")
             
             # 下载视频并提取帧
-            logger.info("开始下载和处理视频...")
+            print(f"📥 开始下载视频...")
             video_path = self.download_video(video_url)
+            print(f"🎬 提取视频帧...")
             frames, frame_count, fps = self.extract_frames(video_path)
             
             # 返回结果
