@@ -35,11 +35,11 @@ except ImportError:
     NETWORK_DIAGNOSIS_TIMEOUT = 5
     NETWORK_CHECK_INTERVAL = 300
     API_ENDPOINTS = {
-        "primary": "http://ark.cn-beijing.volces.com",
-        "fallback": "https://ark.cn-beijing.volces.com",
-        "alternative": "http://ark.cn-shanghai.volces.com"
+        "primary": "https://ark.cn-beijing.volces.com",    # 优先使用HTTPS
+        "fallback": "http://ark.cn-beijing.volces.com",    # 备用使用HTTP
+        "alternative": "https://ark.cn-shanghai.volces.com" # 备用区域端点
     }
-    PREFER_HTTP = True
+    PREFER_HTTP = False
     ENABLE_NETWORK_DIAGNOSIS = True
     ENABLE_AUTO_PROTOCOL_SWITCH = True
     ENABLE_CONNECTION_WARMUP = True
@@ -70,12 +70,13 @@ class SeedreamVideoGeneratorNode:
         }
     
     def diagnose_network(self, endpoint_base="ark.cn-beijing.volces.com"):
-        """诊断网络连接状态"""
+        """诊断网络连接状态 - HTTPS优先策略"""
         print("🔍 网络诊断中...")
         
+        # HTTPS优先检测
         test_endpoints = [
-            f"http://{endpoint_base}",
-            f"https://{endpoint_base}"
+            f"https://{endpoint_base}",  # 优先检测HTTPS
+            f"http://{endpoint_base}"    # 备用检测HTTP
         ]
         
         for endpoint in test_endpoints:
@@ -84,27 +85,33 @@ class SeedreamVideoGeneratorNode:
                 session.timeout = (5, 10)  # 快速测试
                 
                 response = session.get(f"{endpoint}/api/v3/contents/generations/tasks", timeout=(5, 10))
+                print(f"✅ {endpoint} 连接正常 (状态码: {response.status_code})")
                 
-                if endpoint.startswith("http://"):
-                    self.network_status['http_available'] = True
-                else:
+                if endpoint.startswith("https://"):
                     self.network_status['https_available'] = True
+                else:
+                    self.network_status['http_available'] = True
                     
             except Exception as e:
-                if endpoint.startswith("http://"):
-                    self.network_status['http_available'] = False
-                else:
+                print(f"❌ {endpoint} 连接失败: {type(e).__name__}")
+                if endpoint.startswith("https://"):
                     self.network_status['https_available'] = False
+                else:
+                    self.network_status['http_available'] = False
         
-        # 更新连接质量评估
-        if self.network_status['http_available'] and self.network_status['https_available']:
-            self.network_status['connection_quality'] = 'excellent'
-        elif self.network_status['http_available'] or self.network_status['https_available']:
-            self.network_status['connection_quality'] = 'good'
+        # 更新连接质量评估 - HTTPS优先
+        if self.network_status['https_available']:
+            if self.network_status['http_available']:
+                self.network_status['connection_quality'] = 'excellent (HTTPS+HTTP)'
+            else:
+                self.network_status['connection_quality'] = 'good (HTTPS only)'
+        elif self.network_status['http_available']:
+            self.network_status['connection_quality'] = 'good (HTTP only)'
         else:
-            self.network_status['connection_quality'] = 'poor'
+            self.network_status['connection_quality'] = 'poor (no connection)'
         
         self.network_status['last_check'] = time.time()
+        print(f"🌐 网络质量: {self.network_status['connection_quality']}")
         
         return self.network_status
     
@@ -544,17 +551,23 @@ class SeedreamVideoGeneratorNode:
             quality = network_status['connection_quality']
             print(f"🌐 网络状态: {quality}")
             
-            # 根据网络状态选择最优协议
-            if not network_status['http_available'] and network_status['https_available']:
-                api_endpoint = api_endpoint.replace("http://", "https://")
-                print(f"🔒 使用HTTPS协议")
-            elif network_status['http_available'] and not network_status['https_available']:
-                print(f"🌐 使用HTTP协议")
+            # HTTPS优先策略 - 根据网络状态选择最优协议
+            if network_status['https_available']:
+                # HTTPS可用，优先使用
+                api_endpoint = "https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks"
+                print(f"🔒 使用HTTPS协议 (优先)")
+            elif network_status['http_available']:
+                # 只有HTTP可用，使用HTTP
+                api_endpoint = "http://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks"
+                print(f"🌐 使用HTTP协议 (备用)")
             else:
-                print(f"🌐 使用HTTP协议 (优先)")
+                # 两种协议都不可用，默认使用HTTPS
+                api_endpoint = "https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks"
+                print(f"⚠️ 网络连接异常，默认使用HTTPS")
                 
         except Exception as e:
-            logger.warning(f"网络诊断失败: {str(e)}，使用默认配置")
+            logger.warning(f"网络诊断失败: {str(e)}，使用HTTPS默认配置")
+            api_endpoint = "https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks"
         
         # 验证模型是否支持当前模式
         if model_selection == "doubao-seedance-1-0-lite-t2v-250428":
@@ -567,8 +580,8 @@ class SeedreamVideoGeneratorNode:
                 raise ValueError(f"模型 {model_selection} 不支持纯文生视频，请提供至少一张输入图片")
         # pro模型支持所有模式，无需验证
         
-        # API配置 - 支持HTTP降级
-        api_endpoint = "http://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks"
+        # API配置 - HTTPS优先，支持HTTP降级
+        # 注意：api_endpoint已在网络诊断中设置，这里不需要重复设置
         model_id = model_selection  # 使用用户选择的模型
         
         # 构建提示词（添加参数）
@@ -664,9 +677,12 @@ class SeedreamVideoGeneratorNode:
                     # 创建健壮的会话
                     session = self.create_robust_session(max_retries=5, backoff_factor=2.0)
                     
-                    # 记录当前尝试
+                    # 记录当前尝试和协议信息
                     if current_attempt > 1:
                         print(f"🔄 重试第 {current_attempt} 次")
+                    
+                    protocol = "HTTPS" if current_endpoint.startswith("https://") else "HTTP"
+                    print(f"🌐 使用{protocol}协议请求: {current_endpoint}")
                     
                     # 使用健壮的会话发送请求
                     response = session.post(
@@ -679,6 +695,24 @@ class SeedreamVideoGeneratorNode:
                     # 如果成功，跳出重试循环
                     break
                     
+                except (requests.exceptions.SSLError, ssl.SSLError) as e:
+                    # SSL错误，尝试降级到HTTP
+                    if current_endpoint.startswith("https://") and "ark.cn-beijing.volces.com" in current_endpoint:
+                        http_endpoint = current_endpoint.replace("https://", "http://")
+                        print(f"🔒 SSL连接失败，降级到HTTP协议")
+                        print(f"🔄 切换端点: {current_endpoint} → {http_endpoint}")
+                        current_endpoint = http_endpoint
+                        api_endpoint = http_endpoint  # 更新全局端点
+                        
+                        if current_attempt < max_attempts:
+                            print(f"⏳ 等待 2 秒后使用HTTP重试...")
+                            time.sleep(2)
+                            continue
+                        else:
+                            raise RuntimeError(f"HTTPS和HTTP都连接失败: {str(e)}")
+                    else:
+                        raise
+                        
                 except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
                     if current_attempt < max_attempts:
                         # 计算等待时间 - 指数退避
@@ -686,12 +720,13 @@ class SeedreamVideoGeneratorNode:
                         print(f"⏳ 等待 {wait_time} 秒后重试...")
                         time.sleep(wait_time)
                         
-                        # 如果是HTTP连接失败，尝试切换到HTTPS
-                        if current_endpoint.startswith("http://") and "ark.cn-beijing.volces.com" in current_endpoint:
-                            https_endpoint = current_endpoint.replace("http://", "https://")
-                            print(f"🔄 切换到HTTPS协议")
-                            current_endpoint = https_endpoint
-                            api_endpoint = https_endpoint  # 更新全局端点
+                        # 如果是HTTPS连接失败，尝试切换到HTTP
+                        if current_endpoint.startswith("https://") and "ark.cn-beijing.volces.com" in current_endpoint:
+                            http_endpoint = current_endpoint.replace("https://", "http://")
+                            print(f"🔄 连接失败，切换到HTTP协议")
+                            print(f"🔄 切换端点: {current_endpoint} → {http_endpoint}")
+                            current_endpoint = http_endpoint
+                            api_endpoint = http_endpoint  # 更新全局端点
                         continue
                     else:
                         # 所有重试都失败了
@@ -721,14 +756,20 @@ class SeedreamVideoGeneratorNode:
             print(f"🆔 任务ID: {task_id}")
             print(f"📊 状态: {result.get('status', 'unknown')}")
             
-            # 轮询查询任务状态 - 支持HTTP降级
-            query_url = f"http://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks/{task_id}"
+            # 轮询查询任务状态 - 支持协议降级
+            # 根据主请求的协议选择查询协议
+            if api_endpoint.startswith("https://"):
+                query_url = f"https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks/{task_id}"
+            else:
+                query_url = f"http://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks/{task_id}"
+            
             max_attempts = 60  # 最多等待5分钟（5秒一次）
             attempts = 0
             video_url = None
             final_status = "processing"
             
             print(f"⏳ 开始轮询任务状态...")
+            print(f"🔍 查询端点: {query_url}")
             
             while attempts < max_attempts:
                 time.sleep(5)  # 每5秒查询一次
@@ -745,6 +786,9 @@ class SeedreamVideoGeneratorNode:
                     
                     try:
                         # 查询任务状态
+                        protocol = "HTTPS" if current_query_url.startswith("https://") else "HTTP"
+                        print(f"🔍 [{protocol}] 查询任务状态: {current_query_url}")
+                        
                         status_response = session.get(
                             current_query_url,
                             headers=headers,
@@ -754,20 +798,47 @@ class SeedreamVideoGeneratorNode:
                         # 如果成功，跳出重试循环
                         break
                         
+                    except (requests.exceptions.SSLError, ssl.SSLError) as e:
+                        # SSL错误，尝试降级到HTTP
+                        if current_query_url.startswith("https://") and "ark.cn-beijing.volces.com" in current_query_url:
+                            http_query_url = current_query_url.replace("https://", "http://")
+                            print(f"🔒 SSL查询失败，降级到HTTP协议")
+                            print(f"🔄 切换查询端点: {current_query_url} → {http_query_url}")
+                            current_query_url = http_query_url
+                            query_url = http_query_url  # 更新全局查询URL
+                            
+                            if status_attempts < max_status_attempts:
+                                print(f"⏳ 等待 1 秒后使用HTTP重试...")
+                                time.sleep(1)
+                                continue
+                            else:
+                                print(f"⚠️ 状态查询协议降级失败，继续主循环")
+                                break
+                        else:
+                            print(f"❌ 状态查询SSL错误: {str(e)}")
+                            break
+                        
                     except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
                         if status_attempts < max_status_attempts:
                             # 计算等待时间 - 指数退避
                             wait_time = min(2 ** status_attempts, 10)  # 最大等待10秒
                             time.sleep(wait_time)
                             
-                            # 如果是HTTP连接失败，尝试切换到HTTPS
-                            if current_query_url.startswith("http://") and "ark.cn-beijing.volces.com" in current_query_url:
-                                https_query_url = current_query_url.replace("http://", "https://")
-                                current_query_url = https_query_url
-                                query_url = https_query_url  # 更新全局查询URL
+                            # 如果是HTTPS连接失败，尝试切换到HTTP
+                            if current_query_url.startswith("https://") and "ark.cn-beijing.volces.com" in current_query_url:
+                                http_query_url = current_query_url.replace("https://", "http://")
+                                print(f"🔄 查询连接失败，切换到HTTP协议")
+                                print(f"🔄 切换查询端点: {current_query_url} → {http_query_url}")
+                                current_query_url = http_query_url
+                                query_url = http_query_url  # 更新全局查询URL
                             continue
                         else:
+                            print(f"⚠️ 状态查询重试失败，继续主循环")
                             break
+                
+                if status_response is None:
+                    print(f"❌ 状态查询失败，跳过本次查询")
+                    continue
                 
                 if status_response.status_code != 200:
                     print(f"❌ 查询状态失败: {status_response.status_code}")
@@ -818,8 +889,8 @@ class SeedreamVideoGeneratorNode:
         except (requests.exceptions.SSLError, ssl.SSLError) as e:
             logger.error(f"[SSL连接错误] {type(e).__name__}: {str(e)}")
             logger.error(f"[SSL错误详情] 这通常是由网络不稳定或SSL握手失败造成的")
-            logger.error(f"[建议] 请检查网络连接，稍后重试")
-            raise RuntimeError(f"SSL连接失败，请检查网络连接后重试: {str(e)}")
+            logger.error(f"[建议] 系统已自动尝试HTTP降级，如果仍然失败请检查网络连接")
+            raise RuntimeError(f"HTTPS和HTTP都连接失败，请检查网络连接后重试: {str(e)}")
         except requests.exceptions.ConnectionError as e:
             logger.error(f"[网络连接错误] {type(e).__name__}: {str(e)}")
             logger.error(f"[连接错误详情] 无法建立到服务器的连接")
