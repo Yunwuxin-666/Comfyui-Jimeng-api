@@ -1,0 +1,143 @@
+{
+  "9": {
+    "inputs": {
+      "images": [
+        "11",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "11": {
+    "inputs": {
+      "prompt": "把背景改成繁华的都市街道，霓虹灯",
+      "api_key": "",
+      "strength": 0.75,
+      "watermark": false,
+      "seed": 1091869808,
+      "image": [
+        "13",
+        0
+      ]
+    },
+    "class_type": "SeedEditImageEditorNode",
+    "_meta": {
+      "title": "即梦图像编辑"
+    }
+  },
+  "12": {
+    "inputs": {
+      "prompt": "让图片动起来",
+      "api_key": "",
+      "model_selection": "doubao-seedance-1-0-pro-250528",
+      "duration": "5",
+      "ratio": "adaptive",
+      "watermark": false,
+      "seed": 875017157,
+      "fps": "24",
+      "image": [
+        "11",
+        0
+      ]
+    },
+    "class_type": "SeedreamVideoGeneratorNode",
+    "_meta": {
+      "title": "即梦视频生成"
+    }
+  },
+  "13": {
+    "inputs": {
+      "prompt": [
+        "14",
+        0
+      ],
+      "api_key": "",
+      "model_selection": "doubao-seedream-3.0-t2i (基础模型)",
+      "size": "1:1 (1024x1024)",
+      "seed": 1969150207,
+      "watermark": false
+    },
+    "class_type": "SeedreamImageGeneratorNode",
+    "_meta": {
+      "title": "即梦图像生成"
+    }
+  },
+  "14": {
+    "inputs": {
+      "prompt": "反推图片内容并输出对应的AI绘画提示词",
+      "api_key": "",
+      "thinking_mode": "auto",
+      "temperature": 0.7,
+      "max_tokens": 4096,
+      "stream": false,
+      "timeout": 60,
+      "system_prompt": "",
+      "conversation_history": "",
+      "seed": 137253521,
+      "image": [
+        "15",
+        0
+      ]
+    },
+    "class_type": "DoubaoLLMNode",
+    "_meta": {
+      "title": "豆包大语言模型"
+    }
+  },
+  "15": {
+    "inputs": {
+      "image": "pasted/image (180).png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "加载图像"
+    }
+  },
+  "16": {
+    "inputs": {
+      "fps": [
+        "12",
+        2
+      ],
+      "images": [
+        "12",
+        0
+      ]
+    },
+    "class_type": "CreateVideo",
+    "_meta": {
+      "title": "创建视频"
+    }
+  },
+  "17": {
+    "inputs": {
+      "filename_prefix": "video/ComfyUI",
+      "format": "auto",
+      "codec": "auto",
+      "video-preview": "",
+      "video": [
+        "16",
+        0
+      ]
+    },
+    "class_type": "SaveVideo",
+    "_meta": {
+      "title": "保存视频"
+    }
+  },
+  "18": {
+    "inputs": {
+      "images": [
+        "13",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  }
+}
