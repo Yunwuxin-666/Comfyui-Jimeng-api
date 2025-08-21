@@ -35,11 +35,15 @@ cd ComfyUI/custom_nodes
 git clone https://github.com/your-repo/Comfyui-Jimeng-api.git
 ```
 
-### 配置API Key
+### 开通模型服务并配置API Key
 在插件目录下创建 `apikey.txt` 文件：
 ```
 your-api-key-here
 ```
+![img_v3_02pc_7f0bc85a-16ec-411f-898c-ad599b9ea2fg](https://github.com/user-attachments/assets/8463c946-8f47-4a4b-9030-f7b993b45bf1)
+![img_v3_02pc_61160554-8eb7-426f-b014-532afce6eb5g](https://github.com/user-attachments/assets/95653d1f-f792-4025-ab89-ea4514ec14b6)
+![img_v3_02pc_99d3e9a8-4185-47cb-ba87-28612cf1a0eg](https://github.com/user-attachments/assets/8c631019-c907-4e14-9dd7-77ca860fe6be)
+
 
 ### 使用
 1. 在ComfyUI中添加对应节点
