@@ -299,8 +299,9 @@ class SeedreamVideoGeneratorNode:
                 }),
                 "watermark": ("BOOLEAN", {
                     "default": False,
-                    "label_on": "添加水印",
-                    "label_off": "无水印"
+                    "label_on": "true",
+                    "label_off": "false",
+                    "tooltip": "是否在生成的图片中添加水印标识" 
                 }),
             },
             "optional": {
