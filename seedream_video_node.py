@@ -84,8 +84,33 @@ class SeedreamVideoGeneratorNode:
                 session = requests.Session()
                 session.timeout = (5, 10)  # 快速测试
                 
+                # 记录诊断开始时间
+                diagnosis_start_time = time.time()
+                
+                # 解析域名获取IP地址
+                try:
+                    import socket
+                    domain = endpoint_base
+                    ip_addresses = socket.gethostbyname_ex(domain)
+                    primary_ip = ip_addresses[2][0] if ip_addresses[2] else "未知"
+                    all_ips = ", ".join(ip_addresses[2]) if ip_addresses[2] else "未知"
+                    print(f"🌐 DNS解析: {domain} → {all_ips}")
+                except Exception as dns_error:
+                    primary_ip = "DNS解析失败"
+                    all_ips = "DNS解析失败"
+                    print(f"⚠️ DNS解析失败: {domain} - {str(dns_error)}")
+                
                 response = session.get(f"{endpoint}/api/v3/contents/generations/tasks", timeout=(5, 10))
-                print(f"✅ {endpoint} 连接正常 (状态码: {response.status_code})")
+                
+                # 计算诊断耗时
+                diagnosis_duration = time.time() - diagnosis_start_time
+                protocol = "HTTPS" if endpoint.startswith("https://") else "HTTP"
+                print(f"✅ {endpoint} 连接正常 (状态码: {response.status_code}, 耗时: {diagnosis_duration:.2f}秒, IP: {primary_ip})")
+                
+                # 打印响应Header信息
+                print(f"📋 [{protocol}] 诊断响应Header:")
+                for key, value in response.headers.items():
+                    print(f"   {key}: {value}")
                 
                 if endpoint.startswith("https://"):
                     self.network_status['https_available'] = True
@@ -93,7 +118,10 @@ class SeedreamVideoGeneratorNode:
                     self.network_status['http_available'] = True
                     
             except Exception as e:
-                print(f"❌ {endpoint} 连接失败: {type(e).__name__}")
+                # 计算诊断耗时（即使失败也要记录）
+                diagnosis_duration = time.time() - diagnosis_start_time
+                protocol = "HTTPS" if endpoint.startswith("https://") else "HTTP"
+                print(f"❌ {endpoint} 连接失败: {type(e).__name__} (耗时: {diagnosis_duration:.2f}秒, IP: {primary_ip if 'primary_ip' in locals() else '未知'})")
                 if endpoint.startswith("https://"):
                     self.network_status['https_available'] = False
                 else:
@@ -198,13 +226,33 @@ class SeedreamVideoGeneratorNode:
         # 连接池健康检查
         try:
             # 测试连接池是否正常工作
+            health_check_start_time = time.time()
+            
+            # 解析健康检查域名
+            try:
+                import socket
+                health_domain = "httpbin.org"
+                health_ips = socket.gethostbyname_ex(health_domain)
+                health_ip = health_ips[2][0] if health_ips[2] else "未知"
+                print(f"🌐 健康检查DNS解析: {health_domain} → {health_ip}")
+            except Exception as dns_error:
+                health_ip = "DNS解析失败"
+                print(f"⚠️ 健康检查DNS解析失败: {health_domain} - {str(dns_error)}")
+            
             test_response = session.get("http://httpbin.org/get", timeout=(5, 10))
+            health_check_duration = time.time() - health_check_start_time
+            
             if test_response.status_code == 200:
-                print("✅ 连接池配置正常")
+                print(f"✅ 连接池配置正常 (健康检查耗时: {health_check_duration:.2f}秒, IP: {health_ip})")
+                # 打印健康检查响应Header信息
+                print(f"📋 健康检查响应Header:")
+                for key, value in test_response.headers.items():
+                    print(f"   {key}: {value}")
             else:
-                print(f"⚠️ 连接池健康检查异常: {test_response.status_code}")
+                print(f"⚠️ 连接池健康检查异常: {test_response.status_code} (耗时: {health_check_duration:.2f}秒, IP: {health_ip})")
         except Exception as e:
-            print(f"⚠️ 连接池健康检查失败，继续使用当前配置")
+            health_check_duration = time.time() - health_check_start_time
+            print(f"⚠️ 连接池健康检查失败，继续使用当前配置 (耗时: {health_check_duration:.2f}秒, IP: {health_ip if 'health_ip' in locals() else '未知'})")
         
         return session
     
@@ -684,6 +732,22 @@ class SeedreamVideoGeneratorNode:
                     protocol = "HTTPS" if current_endpoint.startswith("https://") else "HTTP"
                     print(f"🌐 使用{protocol}协议请求: {current_endpoint}")
                     
+                    # 解析域名获取IP地址
+                    try:
+                        import socket
+                        domain = "ark.cn-beijing.volces.com"
+                        ip_addresses = socket.gethostbyname_ex(domain)
+                        primary_ip = ip_addresses[2][0] if ip_addresses[2] else "未知"
+                        all_ips = ", ".join(ip_addresses[2]) if ip_addresses[2] else "未知"
+                        print(f"🌐 DNS解析: {domain} → {all_ips}")
+                    except Exception as dns_error:
+                        primary_ip = "DNS解析失败"
+                        all_ips = "DNS解析失败"
+                        print(f"⚠️ DNS解析失败: {domain} - {str(dns_error)}")
+                    
+                    # 记录请求开始时间
+                    request_start_time = time.time()
+                    
                     # 使用健壮的会话发送请求
                     response = session.post(
                         current_endpoint,
@@ -691,6 +755,15 @@ class SeedreamVideoGeneratorNode:
                         json=data,
                         timeout=(15, 600)  # (连接超时, 读取超时)
                     )
+                    
+                    # 计算请求耗时
+                    request_duration = time.time() - request_start_time
+                    print(f"⏱️ {protocol}请求完成，耗时: {request_duration:.2f}秒, IP: {primary_ip}")
+                    
+                    # 打印响应Header信息
+                    print(f"📋 [{protocol}] 主请求响应Header:")
+                    for key, value in response.headers.items():
+                        print(f"   {key}: {value}")
                     
                     # 如果成功，跳出重试循环
                     break
@@ -789,11 +862,36 @@ class SeedreamVideoGeneratorNode:
                         protocol = "HTTPS" if current_query_url.startswith("https://") else "HTTP"
                         print(f"🔍 [{protocol}] 查询任务状态: {current_query_url}")
                         
+                        # 解析域名获取IP地址
+                        try:
+                            import socket
+                            domain = "ark.cn-beijing.volces.com"
+                            ip_addresses = socket.gethostbyname_ex(domain)
+                            primary_ip = ip_addresses[2][0] if ip_addresses[2] else "未知"
+                            all_ips = ", ".join(ip_addresses[2]) if ip_addresses[2] else "未知"
+                            print(f"🌐 [{protocol}] DNS解析: {domain} → {all_ips}")
+                        except Exception as dns_error:
+                            primary_ip = "DNS解析失败"
+                            all_ips = "DNS解析失败"
+                            print(f"⚠️ [{protocol}] DNS解析失败: {domain} - {str(dns_error)}")
+                        
+                        # 记录查询开始时间
+                        query_start_time = time.time()
+                        
                         status_response = session.get(
                             current_query_url,
                             headers=headers,
                             timeout=(15, 300)  # (连接超时, 读取超时)
                         )
+                        
+                        # 计算查询耗时
+                        query_duration = time.time() - query_start_time
+                        print(f"⏱️ [{protocol}] 状态查询完成，耗时: {query_duration:.2f}秒, IP: {primary_ip}")
+                        
+                        # 打印响应Header信息
+                        print(f"📋 [{protocol}] 状态查询响应Header:")
+                        for key, value in status_response.headers.items():
+                            print(f"   {key}: {value}")
                         
                         # 如果成功，跳出重试循环
                         break
