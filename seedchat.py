@@ -213,7 +213,7 @@ class DoubaoLLMNode:
             raise ValueError("请提供对话内容或输入图像/视频")
         
         # API配置
-        api_endpoint = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
+        api_endpoint = "https://ai-budxed1rqdd15m1oi.speedifyvolcai.com/api/v3/chat/completions"
         model_id = "doubao-seed-1-6-250615"  # 支持thinking字段的版本
         
         # 准备请求头

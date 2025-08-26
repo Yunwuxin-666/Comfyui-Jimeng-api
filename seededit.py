@@ -309,7 +309,7 @@ class SeedEditImageEditorNode:
         logger.info(f"[编辑参数] 有蒙版: {'是' if mask is not None else '否'}")
         
         # API配置 - 使用图像编辑API
-        api_endpoint = "https://ark.cn-beijing.volces.com/api/v3/images/generations"
+        api_endpoint = "https://ai-budxed1rqdd15m1oi.speedifyvolcai.com/api/v3/images/generations"
         
         # 根据火山引擎文档，正确的模型ID
         model_id = "doubao-seededit-3-0-i2i-250628"
