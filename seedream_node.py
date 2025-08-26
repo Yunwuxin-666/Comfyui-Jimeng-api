@@ -108,7 +108,7 @@ class SeedreamImageGeneratorNode:
         # 设置默认值（这些参数不再显示在UI中）
         response_format = "url"
         custom_model_id = ""
-        api_endpoint = "https://ark.cn-beijing.volces.com/api/v3"
+        api_endpoint = "https://ai-budxed1rqdd15m1oi.speedifyvolcai.com/api/v3"
         debug_mode = False
         n = 1  # 默认生成1张图片
         
@@ -120,12 +120,12 @@ class SeedreamImageGeneratorNode:
         
         # 处理 api_endpoint 参数，确保它是有效的字符串
         if api_endpoint is None or api_endpoint == "" or api_endpoint == False or not isinstance(api_endpoint, str):
-            api_endpoint = "https://ark.cn-beijing.volces.com/api/v3"
+            api_endpoint = "https://ai-budxed1rqdd15m1oi.speedifyvolcai.com/api/v3"
         
         # 额外的安全检查
         api_endpoint = str(api_endpoint).strip()
         if not api_endpoint or api_endpoint.lower() in ['false', 'none', 'null', '0']:
-            api_endpoint = "https://ark.cn-beijing.volces.com/api/v3"
+            api_endpoint = "https://ai-budxed1rqdd15m1oi.speedifyvolcai.com/api/v3"
         
         # 准备请求头
         headers = {

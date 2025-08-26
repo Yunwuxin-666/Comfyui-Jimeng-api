@@ -1,0 +1,39 @@
+{
+    "api_config": {
+        "api_key": "your-api-key-here",
+        "api_endpoint": "https://ai-budxed1rqdd15m1oi.speedifyvolcai.com/api/v3/contents/generations/tasks",
+        "max_retries": 3,
+        "timeout": 300
+    },
+    
+    "video_generation": {
+        "default_model": "doubao-seedance-1-0-pro-250528",
+        "default_duration": "5",
+        "default_ratio": "16:9",
+        "default_fps": "16",
+        "default_watermark": false
+    },
+    
+    "image_editing": {
+        "default_mode": "inpainting",
+        "default_strength": 0.75,
+        "default_steps": 30,
+        "default_cfg_scale": 7.5,
+        "default_upscale_factor": 2
+    },
+    
+    "performance": {
+        "enable_ssl_verify": true,
+        "connection_pool_size": 10,
+        "max_parallel_tasks": 3,
+        "cache_enabled": false
+    },
+    
+    "logging": {
+        "level": "INFO",
+        "file": "seedream.log",
+        "max_size": "10MB",
+        "backup_count": 3
+    }
+}
+
