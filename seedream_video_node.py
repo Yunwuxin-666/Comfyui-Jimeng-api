@@ -35,8 +35,8 @@ except ImportError:
     NETWORK_DIAGNOSIS_TIMEOUT = 5
     NETWORK_CHECK_INTERVAL = 300
     API_ENDPOINTS = {
-        "primary": "https://ai-budxed1rqdd15m1oi.speedifyvolcai.com",    # 优先使用HTTPS
-        "fallback": "http://ai-budxed1rqdd15m1oi.speedifyvolcai.com",    # 备用使用HTTP
+        "primary": "https://ark.cn-beijing.volces.com",    # 优先使用HTTPS (查询任务)
+        "fallback": "http://ark.cn-beijing.volces.com",    # 备用使用HTTP (查询任务)
         "alternative": "https://ark.cn-shanghai.volces.com" # 备用区域端点
     }
     PREFER_HTTP = False
@@ -69,7 +69,7 @@ class SeedreamVideoGeneratorNode:
             'connection_quality': 'unknown'
         }
     
-    def diagnose_network(self, endpoint_base="ai-budxed1rqdd15m1oi.speedifyvolcai.com"):
+    def diagnose_network(self, endpoint_base="ark.cn-beijing.volces.com"):
         """诊断网络连接状态 - HTTPS优先策略"""
         print("🔍 网络诊断中...")
         
@@ -84,33 +84,7 @@ class SeedreamVideoGeneratorNode:
                 session = requests.Session()
                 session.timeout = (5, 10)  # 快速测试
                 
-                # 记录诊断开始时间
-                diagnosis_start_time = time.time()
-                
-                # 解析域名获取IP地址
-                try:
-                    import socket
-                    domain = endpoint_base
-                    ip_addresses = socket.gethostbyname_ex(domain)
-                    primary_ip = ip_addresses[2][0] if ip_addresses[2] else "未知"
-                    all_ips = ", ".join(ip_addresses[2]) if ip_addresses[2] else "未知"
-                    print(f"🌐 DNS解析: {domain} → {all_ips}")
-                except Exception as dns_error:
-                    primary_ip = "DNS解析失败"
-                    all_ips = "DNS解析失败"
-                    print(f"⚠️ DNS解析失败: {domain} - {str(dns_error)}")
-                
                 response = session.get(f"{endpoint}/api/v3/contents/generations/tasks", timeout=(5, 10))
-                
-                # 计算诊断耗时
-                diagnosis_duration = time.time() - diagnosis_start_time
-                protocol = "HTTPS" if endpoint.startswith("https://") else "HTTP"
-                print(f"✅ {endpoint} 连接正常 (状态码: {response.status_code}, 耗时: {diagnosis_duration:.2f}秒, IP: {primary_ip})")
-                
-                # 打印响应Header信息
-                print(f"📋 [{protocol}] 诊断响应Header:")
-                for key, value in response.headers.items():
-                    print(f"   {key}: {value}")
                 
                 if endpoint.startswith("https://"):
                     self.network_status['https_available'] = True
@@ -118,10 +92,6 @@ class SeedreamVideoGeneratorNode:
                     self.network_status['http_available'] = True
                     
             except Exception as e:
-                # 计算诊断耗时（即使失败也要记录）
-                diagnosis_duration = time.time() - diagnosis_start_time
-                protocol = "HTTPS" if endpoint.startswith("https://") else "HTTP"
-                print(f"❌ {endpoint} 连接失败: {type(e).__name__} (耗时: {diagnosis_duration:.2f}秒, IP: {primary_ip if 'primary_ip' in locals() else '未知'})")
                 if endpoint.startswith("https://"):
                     self.network_status['https_available'] = False
                 else:
@@ -139,7 +109,7 @@ class SeedreamVideoGeneratorNode:
             self.network_status['connection_quality'] = 'poor (no connection)'
         
         self.network_status['last_check'] = time.time()
-        print(f"🌐 网络质量: {self.network_status['connection_quality']}")
+        print(f"🌐 网络状态: {self.network_status['connection_quality']}")
         
         return self.network_status
     
@@ -600,23 +570,23 @@ class SeedreamVideoGeneratorNode:
             quality = network_status['connection_quality']
             print(f"🌐 网络状态: {quality}")
             
-            # HTTPS优先策略 - 根据网络状态选择最优协议
+            # 创建任务使用新域名 - HTTPS优先策略
             if network_status['https_available']:
                 # HTTPS可用，优先使用
-                api_endpoint = "https://ai-budxed1rqdd15m1oi.speedifyvolcai.com/api/v3/contents/generations/tasks"
-                print(f"🔒 使用HTTPS协议 (优先)")
+                create_task_endpoint = "https://ai-budxed1rqdd15m1oi.speedifyvolcai.com/api/v3/contents/generations/tasks"
+                print(f"🔒 创建任务使用HTTPS协议 (新域名)")
             elif network_status['http_available']:
                 # 只有HTTP可用，使用HTTP
-                api_endpoint = "http://ai-budxed1rqdd15m1oi.speedifyvolcai.com/api/v3/contents/generations/tasks"
-                print(f"🌐 使用HTTP协议 (备用)")
+                create_task_endpoint = "http://ai-budxed1rqdd15m1oi.speedifyvolcai.com/api/v3/contents/generations/tasks"
+                print(f"🌐 创建任务使用HTTP协议 (新域名)")
             else:
                 # 两种协议都不可用，默认使用HTTPS
-                api_endpoint = "https://ai-budxed1rqdd15m1oi.speedifyvolcai.com/api/v3/contents/generations/tasks"
-                print(f"⚠️ 网络连接异常，默认使用HTTPS")
+                create_task_endpoint = "https://ai-budxed1rqdd15m1oi.speedifyvolcai.com/api/v3/contents/generations/tasks"
+                print(f"⚠️ 网络连接异常，创建任务默认使用HTTPS (新域名)")
                 
         except Exception as e:
             logger.warning(f"网络诊断失败: {str(e)}，使用HTTPS默认配置")
-            api_endpoint = "https://ai-budxed1rqdd15m1oi.speedifyvolcai.com/api/v3/contents/generations/tasks"
+            create_task_endpoint = "https://ai-budxed1rqdd15m1oi.speedifyvolcai.com/api/v3/contents/generations/tasks"
         
         # 验证模型是否支持当前模式
         if model_selection == "doubao-seedance-1-0-lite-t2v-250428":
@@ -630,7 +600,7 @@ class SeedreamVideoGeneratorNode:
         # pro模型支持所有模式，无需验证
         
         # API配置 - HTTPS优先，支持HTTP降级
-        # 注意：api_endpoint已在网络诊断中设置，这里不需要重复设置
+        # 注意：create_task_endpoint已在网络诊断中设置，这里不需要重复设置
         model_id = model_selection  # 使用用户选择的模型
         
         # 构建提示词（添加参数）
@@ -720,7 +690,7 @@ class SeedreamVideoGeneratorNode:
             
             while current_attempt < max_attempts:
                 current_attempt += 1
-                current_endpoint = api_endpoint
+                current_endpoint = create_task_endpoint
                 
                 try:
                     # 创建健壮的会话
@@ -733,25 +703,27 @@ class SeedreamVideoGeneratorNode:
                     protocol = "HTTPS" if current_endpoint.startswith("https://") else "HTTP"
                     print(f"🌐 使用{protocol}协议请求: {current_endpoint}")
                     
-                    # 解析域名获取IP地址
-                    try:
-                        import socket
-                        domain = "ai-budxed1rqdd15m1oi.speedifyvolcai.com"
-                        ip_addresses = socket.gethostbyname_ex(domain)
-                        primary_ip = ip_addresses[2][0] if ip_addresses[2] else "未知"
-                        all_ips = ", ".join(ip_addresses[2]) if ip_addresses[2] else "未知"
-                        print(f"🌐 DNS解析: {domain} → {all_ips}")
-                    except Exception as dns_error:
-                        primary_ip = "DNS解析失败"
-                        all_ips = "DNS解析失败"
-                        print(f"⚠️ DNS解析失败: {domain} - {str(dns_error)}")
+                    # 设置默认IP信息
+                    primary_ip = "未知"
                     
                     # 记录请求开始时间
                     request_start_time = time.time()
                     
-                    # 使用健壮的会话发送请求
+                    # 打印请求头信息（排除Authorization）
+                    print(f"📤 [{protocol}] 创建任务请求头:")
+                    for key, value in headers.items():
+                        if key.lower() != 'authorization':
+                            print(f"   {key}: {value}")
+                    
+                    # 计算并打印请求数据长度
+                    import json
+                    request_data_str = json.dumps(data, ensure_ascii=False)
+                    request_size = len(request_data_str.encode('utf-8'))
+                    print(f"📏 请求数据长度: {request_size} 字节")
+                    
+                    # 使用健壮的会话发送请求 - 创建任务使用新域名
                     response = session.post(
-                        current_endpoint,
+                        create_task_endpoint,
                         headers=headers,
                         json=data,
                         timeout=(15, 600)  # (连接超时, 读取超时)
@@ -776,7 +748,7 @@ class SeedreamVideoGeneratorNode:
                         print(f"🔒 SSL连接失败，降级到HTTP协议")
                         print(f"🔄 切换端点: {current_endpoint} → {http_endpoint}")
                         current_endpoint = http_endpoint
-                        api_endpoint = http_endpoint  # 更新全局端点
+                        create_task_endpoint = http_endpoint  # 更新创建任务端点
                         
                         if current_attempt < max_attempts:
                             print(f"⏳ 等待 2 秒后使用HTTP重试...")
@@ -800,7 +772,7 @@ class SeedreamVideoGeneratorNode:
                             print(f"🔄 连接失败，切换到HTTP协议")
                             print(f"🔄 切换端点: {current_endpoint} → {http_endpoint}")
                             current_endpoint = http_endpoint
-                            api_endpoint = http_endpoint  # 更新全局端点
+                            create_task_endpoint = http_endpoint  # 更新创建任务端点
                         continue
                     else:
                         # 所有重试都失败了
@@ -830,12 +802,10 @@ class SeedreamVideoGeneratorNode:
             print(f"🆔 任务ID: {task_id}")
             print(f"📊 状态: {result.get('status', 'unknown')}")
             
-            # 轮询查询任务状态 - 支持协议降级
-            # 根据主请求的协议选择查询协议
-            if api_endpoint.startswith("https://"):
-                query_url = f"https://ai-budxed1rqdd15m1oi.speedifyvolcai.com/api/v3/contents/generations/tasks/{task_id}"
-            else:
-                query_url = f"http://ai-budxed1rqdd15m1oi.speedifyvolcai.com/api/v3/contents/generations/tasks/{task_id}"
+            # 轮询查询任务状态 - 查询任务使用旧域名
+            # 查询任务固定使用旧域名，确保兼容性
+            query_url = f"https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks/{task_id}"
+            print(f"🔍 查询任务状态使用旧域名: {query_url}")
             
             max_attempts = 60  # 最多等待5分钟（5秒一次）
             attempts = 0
@@ -863,21 +833,20 @@ class SeedreamVideoGeneratorNode:
                         protocol = "HTTPS" if current_query_url.startswith("https://") else "HTTP"
                         print(f"🔍 [{protocol}] 查询任务状态: {current_query_url}")
                         
-                        # 解析域名获取IP地址
-                        try:
-                            import socket
-                            domain = "ai-budxed1rqdd15m1oi.speedifyvolcai.com"
-                            ip_addresses = socket.gethostbyname_ex(domain)
-                            primary_ip = ip_addresses[2][0] if ip_addresses[2] else "未知"
-                            all_ips = ", ".join(ip_addresses[2]) if ip_addresses[2] else "未知"
-                            print(f"🌐 [{protocol}] DNS解析: {domain} → {all_ips}")
-                        except Exception as dns_error:
-                            primary_ip = "DNS解析失败"
-                            all_ips = "DNS解析失败"
-                            print(f"⚠️ [{protocol}] DNS解析失败: {domain} - {str(dns_error)}")
+                        # 设置默认IP信息
+                        primary_ip = "未知"
                         
                         # 记录查询开始时间
                         query_start_time = time.time()
+                        
+                        # 打印请求头信息（排除Authorization）
+                        print(f"📤 [{protocol}] 查询任务状态请求头:")
+                        for key, value in headers.items():
+                            if key.lower() != 'authorization':
+                                print(f"   {key}: {value}")
+                        
+                        # 计算并打印请求数据长度（GET请求通常没有请求体）
+                        print(f"📏 请求类型: GET (无请求体)")
                         
                         status_response = session.get(
                             current_query_url,
@@ -1007,7 +976,7 @@ class SeedreamVideoGeneratorNode:
             raise RuntimeError(f"HTTP请求失败: {str(e)}")
         except requests.exceptions.RequestException as e:
             logger.error(f"[网络请求异常] {type(e).__name__}: {str(e)}")
-            logger.error(f"[请求详情] 最后请求的URL: {api_endpoint if 'api_endpoint' in locals() else 'Unknown'}")
+            logger.error(f"[请求详情] 最后请求的URL: {create_task_endpoint if 'create_task_endpoint' in locals() else 'Unknown'}")
             raise RuntimeError(f"网络请求失败: {str(e)}")
         except Exception as e:
             logger.error(f"[生成视频异常] {type(e).__name__}: {str(e)}")
