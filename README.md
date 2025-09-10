@@ -41,7 +41,7 @@ git clone https://github.com/Yunwuxin-666/Comfyui-Jimeng-api.git
 ```
 
 ### 开通模型服务并配置API Key
-在插件目录下创建 `apikey.txt` 文件：
+在 `apikey.txt` 文件里输入apikey：
 ```
 your-api-key-here
 ```
