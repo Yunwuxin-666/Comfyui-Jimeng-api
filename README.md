@@ -37,7 +37,7 @@
 ### 安装
 ```bash
 cd ComfyUI/custom_nodes
-git clone https://github.com/your-repo/Comfyui-Jimeng-api.git
+git clone https://github.com/Yunwuxin-666/Comfyui-Jimeng-api.git
 ```
 
 ### 开通模型服务并配置API Key
