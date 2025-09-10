@@ -241,8 +241,27 @@ class Seedream4StreamingNode:
     def update_progress(self, current_step, total_steps, message=""):
         """更新进度显示并返回进度值"""
         progress = (current_step + 1) / total_steps * 100
-        print(f"📊 进度: {progress:.1f}% - {message}")
+        # 简化日志输出，只显示关键信息
+        if current_step == 0 or current_step == total_steps - 1:
+            print(f"📊 {message}")
         return progress
+    
+    def get_api_size(self, size_param):
+        """将用户选择的size参数转换为API需要的格式"""
+        size_mapping = {
+            "1K": "1K",
+            "2K": "2K", 
+            "4K": "4K",
+            "1:1 (2048x2048)": "2048x2048",
+            "4:3 (2304x1728)": "2304x1728",
+            "3:4 (1728x2304)": "1728x2304",
+            "16:9 (2560x1440)": "2560x1440",
+            "9:16 (1440x2560)": "1440x2560",
+            "3:2 (2496x1664)": "2496x1664",
+            "2:3 (1664x2496)": "1664x2496",
+            "21:9 (3024x1296)": "3024x1296"
+        }
+        return size_mapping.get(size_param, "2K")
     
     def tensor_to_base64(self, tensor_image):
         """将张量图像转换为base64字符串 - 参考seededit.py"""
@@ -320,26 +339,28 @@ class Seedream4StreamingNode:
                     "multiline": False,
                     "placeholder": "请输入您的火山引擎API Key"
                 }),
-                "batch_size": ("INT", {
-                    "default": 1,
+                "max_images": ("INT", {
+                    "default": 4,
                     "min": 1,
-                    "max": 4,
+                    "max": 8,
                     "step": 1,
-                    "display": "number"
+                    "display": "number",
+                    "tooltip": "组图生成的最大图像数量"
                 }),
-                "resolution": ([
+                "size": ([
                     "1K",
                     "2K", 
-                    "4K"
+                    "4K",
+                    "1:1 (2048x2048)",
+                    "4:3 (2304x1728)",
+                    "3:4 (1728x2304)",
+                    "16:9 (2560x1440)",
+                    "9:16 (1440x2560)",
+                    "3:2 (2496x1664)",
+                    "2:3 (1664x2496)",
+                    "21:9 (3024x1296)"
                 ], {
                     "default": "2K"
-                }),
-                "guidance_scale": ("FLOAT", {
-                    "default": 7.5,
-                    "min": 1.0,
-                    "max": 20.0,
-                    "step": 0.1,
-                    "display": "slider"
                 }),
                 "sequential_image_generation": (["disabled", "auto"], {
                     "default": "disabled",
@@ -347,8 +368,8 @@ class Seedream4StreamingNode:
                 }),
                 "watermark": ("BOOLEAN", {
                     "default": False,
-                    "label_on": "启用水印",
-                    "label_off": "禁用水印"
+                    "label_on": "true",
+                    "label_off": "false"
                 })
             },
             "optional": {
@@ -375,15 +396,16 @@ class Seedream4StreamingNode:
     
 支持特性：
 - 多图融合（多图输入单图输出）
-- 序列生成（多图输入多图输出）
+- 组图生成（单图/多图输入多图输出）
 - 高质量图像生成（1K/2K/4K）
 - 水印控制
 - 引导强度调节
+- 实时进度追踪
 
 模型：doubao-seedream-4-0-250828
 """
     
-    def generate_images(self, prompt, api_key, batch_size, resolution, guidance_scale, 
+    def generate_images(self, prompt, api_key, max_images, size, 
                        sequential_image_generation="disabled", watermark=False, 
                        image1=None, image2=None, image3=None, image4=None):
         """生成图像的主函数"""
@@ -404,31 +426,44 @@ class Seedream4StreamingNode:
         model_id = "doubao-seedream-4-0-250828"
         
         print(f"🚀 开始生成图像...")
-        print(f"📝 提示词: {prompt[:100]}{'...' if len(prompt) > 100 else ''}")
-        print(f"🤖 模型: {model_id}")
-        print(f"📐 分辨率: {resolution}")
-        print(f"📦 批次大小: {batch_size}")
-        print(f"🎯 引导强度: {guidance_scale}")
-        print(f"🔄 序列生成: {sequential_image_generation}")
-        print(f"🏷️ 水印: {'开启' if watermark else '关闭'}")
+        print(f"📝 提示词: {prompt[:50]}{'...' if len(prompt) > 50 else ''}")
+        api_size = self.get_api_size(size)
+        print(f"📐 分辨率: {api_size} | 最大图像: {max_images} | 模式: {sequential_image_generation}")
         
         # 初始化进度追踪
         total_steps = 6
         current_progress = 0
         
-        # 构建请求数据
-        data = {
-            "model": model_id,
-            "prompt": prompt,
-            "size": resolution,
-            "n": batch_size,
-            "response_format": "url",
-            "watermark": watermark
-        }
+        # 转换size参数为API格式
+        api_size = self.get_api_size(size)
         
-        # 添加guidance_scale参数
-        if guidance_scale != 7.5:
-            data["guidance_scale"] = guidance_scale
+        # 根据sequential_image_generation参数决定请求格式
+        if sequential_image_generation == "auto":
+            # 组图生成模式 - 根据官方文档
+            print(f"🎨 使用组图生成模式")
+            data = {
+                "model": model_id,
+                "prompt": prompt,
+                "size": api_size,
+                "sequential_image_generation": "auto",
+                "sequential_image_generation_options": {
+                    "max_images": max_images
+                },
+                "stream": False,
+                "response_format": "url",
+                "watermark": watermark
+            }
+        else:
+            # 单图或多图融合模式
+            data = {
+                "model": model_id,
+                "prompt": prompt,
+                "size": api_size,
+                "n": 1,  # 融合模式固定生成1张图像
+                "response_format": "url",
+                "watermark": watermark
+            }
+        
         
         try:
             # 创建会话
@@ -462,101 +497,43 @@ class Seedream4StreamingNode:
                 # 更新进度 - 步骤1: 分析输入
                 current_progress = self.update_progress(0, total_steps, "分析输入图像...")
                 
+                # 更新进度 - 步骤2: 处理图像
+                current_progress = self.update_progress(1, total_steps, "处理输入图像...")
+                
+                # 将所有图像转换为base64数组
+                image_array = []
+                for i, img in enumerate(input_images):
+                    base64_image = self.tensor_to_base64(img)
+                    image_array.append(base64_image)
+                print(f"🖼️ 处理{len(input_images)}张输入图像")
+                
                 # 根据sequential_image_generation参数决定处理方式
                 if sequential_image_generation == "disabled":
-                    # 多图融合模式 - 根据官方文档
-                    print(f"🔀 使用多图融合模式")
-                    
-                    # 更新进度 - 步骤2: 处理图像
-                    current_progress = self.update_progress(1, total_steps, "处理输入图像...")
-                    
-                    # 将所有图像转换为base64数组
-                    image_array = []
-                    for i, img in enumerate(input_images):
-                        base64_image = self.tensor_to_base64(img)
-                        image_array.append(base64_image)
-                        print(f"🖼️ 处理图像 {i+1}: {img.shape}")
-                    
-                    # 构建多图融合请求 - 参考官方文档格式
+                    # 多图融合模式
                     data.update({
-                        "image": image_array,  # 图像数组
-                        "sequential_image_generation": "disabled",  # 禁用序列生成
-                        "n": 1  # 融合后生成1张图像
+                        "image": image_array,
+                        "sequential_image_generation": "disabled",
+                        "n": 1
                     })
-                    
-                    print(f"🔄 多图融合请求已构建，图像数量: {len(image_array)}")
-                    
-                    # 更新进度 - 步骤3: 准备API请求
-                    current_progress = self.update_progress(2, total_steps, "准备API请求...")
+                    print(f"🔀 多图融合模式 - {len(image_array)}张输入")
                     
                 elif sequential_image_generation == "auto":
-                    # 序列生成模式
-                    print(f"🔄 使用序列生成模式")
-                    
-                    # 更新进度 - 步骤2: 处理图像
-                    current_progress = self.update_progress(1, total_steps, "处理输入图像...")
-                    
-                    # 为每张图像生成对应的输出
-                    processed_images = []
-                    for i, img in enumerate(input_images):
-                        # 更新进度 - 处理每张图像
-                        progress_step = 2 + (i * 2) // batch_count
-                        current_progress = self.update_progress(progress_step, total_steps, f"处理第 {i+1} 张图像...")
-                        
-                        base64_image = self.tensor_to_base64(img)
-                        
-                        # 构建单图请求
-                        img_data = {
-                            "model": model_id,
-                            "prompt": prompt,
-                            "image": base64_image,
-                            "size": resolution,
-                            "n": 1,
-                            "response_format": "url",
-                            "watermark": watermark
+                    # 组图生成模式
+                    data.update({
+                        "image": image_array,
+                        "sequential_image_generation": "auto",
+                        "sequential_image_generation_options": {
+                            "max_images": max_images
                         }
-                        
-                        # 添加guidance_scale参数
-                        if guidance_scale != 7.5:
-                            img_data["guidance_scale"] = guidance_scale
-                        
-                        # 发送单图请求
-                        try:
-                            print(f"🖼️ 处理第 {i+1} 张图像...")
-                            img_response = session.post(api_endpoint, headers=headers, json=img_data)
-                            
-                            if img_response.status_code == 200:
-                                img_result = img_response.json()
-                                generated_images = self.process_response_images(img_result)
-                                if len(generated_images) > 0:
-                                    processed_images.append(generated_images[0])
-                                else:
-                                    processed_images.append(img)
-                            else:
-                                print(f"❌ 第 {i+1} 张图像处理失败: {img_response.status_code}")
-                                processed_images.append(img)
-                                
-                        except Exception as e:
-                            print(f"❌ 第 {i+1} 张图像处理异常: {str(e)}")
-                            processed_images.append(img)
-                    
-                    # 返回序列生成结果
-                    if processed_images:
-                        final_images = torch.stack(processed_images)
-                        generation_time = time.time() - start_time
-                        
-                        print(f"✅ 序列生成完成！")
-                        print(f"⏱️ 生成时间: {generation_time:.2f}秒")
-                        print(f"📸 处理图像数量: {len(processed_images)}")
-                        
-                        # 最终进度 - 100%
-                        final_progress = self.update_progress(5, total_steps, "序列生成完成！")
-                        return (final_images, "sequential_completed", "completed", len(processed_images), generation_time, final_progress)
-                    else:
-                        raise RuntimeError("序列生成失败，没有生成任何图像")
+                    })
+                    print(f"🎨 组图生成模式 - {len(image_array)}张输入 → {max_images}张输出")
+                
+                # 更新进度 - 步骤3: 准备API请求
+                current_progress = self.update_progress(2, total_steps, "准备API请求...")
             else:
                 # 纯文本生成模式
-                print(f"📝 使用纯文本生成模式")
+                mode_text = "组图" if sequential_image_generation == "auto" else "单图"
+                print(f"📝 纯文本{mode_text}生成模式")
                 # 更新进度 - 步骤1: 分析输入
                 current_progress = self.update_progress(0, total_steps, "分析提示词...")
                 # 更新进度 - 步骤2: 准备请求
@@ -571,27 +548,20 @@ class Seedream4StreamingNode:
                 json=data
             )
             
-            print(f"📊 响应状态码: {response.status_code}")
-            print(f"📋 响应头: {dict(response.headers)}")
+            # 更新进度 - 步骤5: 处理响应
+            current_progress = self.update_progress(4, total_steps, "处理API响应...")
             
             if response.status_code != 200:
-                print(f"❌ API请求失败: {response.status_code}")
-                print(f"📄 响应内容: {response.text[:500]}")
-                raise RuntimeError(f"API请求失败: {response.status_code} - {response.text[:200]}")
+                raise RuntimeError(f"API请求失败: {response.status_code}")
             
             # 检查响应内容是否为空
             if not response.text.strip():
                 raise RuntimeError("API返回空响应")
             
-            # 更新进度 - 步骤5: 处理响应
-            current_progress = self.update_progress(4, total_steps, "处理API响应...")
-            
             # 尝试解析JSON
             try:
                 result = response.json()
             except json.JSONDecodeError as e:
-                print(f"❌ JSON解析失败: {str(e)}")
-                print(f"📄 响应内容: {response.text[:1000]}")
                 raise RuntimeError(f"API返回非JSON格式响应: {response.text[:200]}")
             
             # 更新进度 - 步骤6: 生成最终结果
@@ -602,14 +572,12 @@ class Seedream4StreamingNode:
             
             generation_time = time.time() - start_time
             
-            print(f"✅ 图像生成完成！")
-            print(f"⏱️ 生成时间: {generation_time:.2f}秒")
-            print(f"📸 生成图像数量: {len(images)}")
+            print(f"✅ 生成完成！{len(images)}张图像，耗时{generation_time:.1f}秒")
             
             # 最终进度 - 100%
             final_progress = self.update_progress(5, total_steps, "任务完成！")
             
-            return (images, result.get("task_id", ""), "completed", batch_size, generation_time, final_progress)
+            return (images, result.get("task_id", ""), "completed", len(images), generation_time, final_progress)
             
         except Exception as e:
             print(f"❌ 生成失败: {str(e)}")
