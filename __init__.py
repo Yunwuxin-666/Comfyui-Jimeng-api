@@ -15,12 +15,16 @@ if current_dir not in sys.path:
 from .seedream_node import SeedreamImageGeneratorNode
 from .seedream_video_node import SeedreamVideoGeneratorNode
 from .seedchat import DoubaoLLMNode
+from .seededit import SeedEditImageEditorNode
+from .seedream4_0 import Seedream4StreamingNode
 
 # 节点映射字典
 NODE_CLASS_MAPPINGS = {
     "SeedreamImageGeneratorNode": SeedreamImageGeneratorNode,
     "SeedreamVideoGeneratorNode": SeedreamVideoGeneratorNode,
     "DoubaoLLMNode": DoubaoLLMNode,
+    "SeedEditImageEditorNode": SeedEditImageEditorNode,
+    "Seedream4StreamingNode": Seedream4StreamingNode,
 }
 
 # 节点显示名称映射
@@ -28,6 +32,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SeedreamImageGeneratorNode": "即梦图像生成",
     "SeedreamVideoGeneratorNode": "即梦视频生成",
     "DoubaoLLMNode": "豆包大语言模型",
+    "SeedEditImageEditorNode": "即梦图像编辑",
+    "Seedream4StreamingNode": "即梦4.0生成",
 }
 
 # 导出列表
